@@ -1,0 +1,73 @@
+using System.Text.Json.Serialization;
+using AiCtrl.Core.Api;
+using AiCtrl.Core.Commands;
+using AiCtrl.Core.Domain;
+using AiCtrl.Core.Events;
+using AiCtrl.Core.Protocol;
+using AiCtrl.Core.Providers;
+
+namespace AiCtrl.Core.Serialization;
+
+[JsonSourceGenerationOptions(
+    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
+    UseStringEnumConverter = true)]
+[JsonSerializable(typeof(MachineId))]
+[JsonSerializable(typeof(InstanceId))]
+[JsonSerializable(typeof(SessionRef))]
+[JsonSerializable(typeof(RetryInfo))]
+[JsonSerializable(typeof(ModelRef))]
+[JsonSerializable(typeof(SessionSummary))]
+[JsonSerializable(typeof(MessageView))]
+[JsonSerializable(typeof(PartView))]
+[JsonSerializable(typeof(ToolPartView))]
+[JsonSerializable(typeof(ErrorInfo))]
+[JsonSerializable(typeof(MachineInfo))]
+[JsonSerializable(typeof(InstanceInfo))]
+[JsonSerializable(typeof(MachineHealth))]
+[JsonSerializable(typeof(MachineSnapshot))]
+[JsonSerializable(typeof(MachineFeature))]
+[JsonSerializable(typeof(VpnStatusView))]
+[JsonSerializable(typeof(VpnCountryView))]
+[JsonSerializable(typeof(VpnServerRow))]
+[JsonSerializable(typeof(VpnCityGroup))]
+[JsonSerializable(typeof(VpnPageSnapshot))]
+[JsonSerializable(typeof(VpnServerPage))]
+[JsonSerializable(typeof(WorkspaceInfo))]
+[JsonSerializable(typeof(FileEntry))]
+[JsonSerializable(typeof(CapabilitySet))]
+[JsonSerializable(typeof(CommandEnvelope))]
+[JsonSerializable(typeof(CommandStatus))]
+[JsonSerializable(typeof(SessionAbortPayload))]
+[JsonSerializable(typeof(SessionPromptPayload))]
+[JsonSerializable(typeof(SessionAbortAndPromptPayload))]
+[JsonSerializable(typeof(SessionCreatePayload))]
+[JsonSerializable(typeof(SessionPermissionReplyPayload))]
+[JsonSerializable(typeof(OpenCodeBackendRestartPayload))]
+[JsonSerializable(typeof(VpnConnectPayload))]
+[JsonSerializable(typeof(FilesReceivePayload))]
+[JsonSerializable(typeof(FilesSendPayload))]
+[JsonSerializable(typeof(FilesMkdirPayload))]
+[JsonSerializable(typeof(FilesDeletePayload))]
+[JsonSerializable(typeof(FilesRenamePayload))]
+[JsonSerializable(typeof(WorkspaceRegisterPayload))]
+[JsonSerializable(typeof(PowerKeepAwakePayload))]
+[JsonSerializable(typeof(AgentEventEnvelope))]
+[JsonSerializable(typeof(EventBatch))]
+[JsonSerializable(typeof(EventsAck))]
+[JsonSerializable(typeof(RequestPacket))]
+[JsonSerializable(typeof(AckPacket))]
+[JsonSerializable(typeof(ProgressPacket))]
+[JsonSerializable(typeof(ResponsePacket))]
+[JsonSerializable(typeof(Ack))]
+[JsonSerializable(typeof(HelloRequest))]
+[JsonSerializable(typeof(HelloAck))]
+[JsonSerializable(typeof(QueryEnvelope))]
+[JsonSerializable(typeof(QueryResult))]
+[JsonSerializable(typeof(StreamChunk))]
+[JsonSerializable(typeof(StreamBatch))]
+[JsonSerializable(typeof(ApiResponse<MachineInfo>))]
+[JsonSerializable(typeof(ApiResponse<MachineSnapshot>))]
+[JsonSerializable(typeof(ApiResponse<SessionSummary>))]
+[JsonSerializable(typeof(ResponseMeta))]
+[JsonSerializable(typeof(AcProblemDetails))]
+public sealed partial class AcJsonContext : JsonSerializerContext;

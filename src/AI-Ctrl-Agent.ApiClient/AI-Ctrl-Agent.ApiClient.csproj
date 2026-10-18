@@ -1,0 +1,11 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>AiCtrl.ApiClient</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AI-Ctrl-Agent.Core\AI-Ctrl-Agent.Core.csproj" />
+  </ItemGroup>
+
+</Project>
