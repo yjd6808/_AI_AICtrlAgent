@@ -40,7 +40,10 @@ public sealed record ToolPartView(
     string Tool,
     string Status,
     string? Title,
-    string? OutputPreview);
+    string? OutputPreview,
+    string? Input,
+    DateTimeOffset? StartedAt,
+    DateTimeOffset? CompletedAt);
 
 public sealed record ErrorInfo(
     ErrorClass Class,

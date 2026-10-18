@@ -116,7 +116,7 @@ public sealed class AcJsonSerializationTests
             [
                 new StreamChunk("msg_1", "prt_1", "text", 7, StreamOp.Append, "partial", null),
                 new StreamChunk("msg_1", "prt_2", "tool", 8, StreamOp.ToolState, null,
-                    new ToolPartView("bash", "completed", "npm test", "ok")),
+                    new ToolPartView("bash", "completed", "npm test", "ok", "npm test", null, null)),
             ]);
 
         var json = JsonSerializer.Serialize(batch, AcJsonContext.Default.StreamBatch);
