@@ -38,7 +38,7 @@ public sealed class MonitorSystem : IAcSystem
 
     public string Name => "monitor";
 
-    public IReadOnlyList<string> DependsOn { get; } = Array.Empty<string>();
+    public IReadOnlyList<string> DependsOn { get; } = new[] { "provider-host" };
 
     public ValueTask InitAsync(AcSystemContext ctx, CancellationToken ct)
     {

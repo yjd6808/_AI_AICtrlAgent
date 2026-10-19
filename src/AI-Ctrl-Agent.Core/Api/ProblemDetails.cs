@@ -55,4 +55,22 @@ public static class AcErrorCodes
     public const string QueryTimeout = "query_timeout";
 
     public const string WorkspaceNotAllowed = "workspace_not_allowed";
+
+    public const string SessionNotFound = "session_not_found";
+
+    public const string InstanceNotFound = "instance_not_found";
+
+    public const string InvalidPayload = "invalid_payload";
+
+    public const string UnsupportedCommand = "unsupported_command";
+
+    public const string InternalError = "internal_error";
+
+    public const string DuplicateCommand = "duplicate_command";
+
+    public const string CommandNotFound = "command_not_found";
+
+    public const string Unauthorized = "unauthorized";
+
+    public const string InvalidHost = "invalid_host";
 }
