@@ -100,3 +100,77 @@ Server 없이 Client Local API와 stdio ClientMCP만으로 `abort_and_prompt` �
 - 관리형 백엔드 비밀번호는 현재 프로세스 메모리에만 유지한다. Client 재시작 후 기존 백엔드 adopt는 M9 DPAPI `ISecretStore` 구현에서 완성한다.
 - G4 quota 오류 실캡처와 G5 messageID 중복 실측은 여전히 보류다.
 - ProviderHost는 관리형 백엔드 시작·감시·인스턴스 탐색까지 연결했으며, 인스턴스 재탐색 주기(30s)와 프로세스 스캔은 M5 전후로 보강한다.
+
+## M3 MUST 테스트 검증 — 완료 (2026-10-20)
+
+Server 등록·인증·GeoGate·AgentHub와 Client enroll·ServerLink·Outbox를 구현하고, 실제 Kestrel 호스트를 띄우는 통합 테스트로 검증했다. 테스트 합계 263개(기존 236 + M3 신규 27), 실패 0, 경고 0.
+
+| 파일 | 개수 | 검증 내용 |
+|---|---|---|
+| `GeoGateMiddlewareTests` | 7 | local 리스너 통과, 허용 국가 통과, 차단 국가 403, lookup 실패 fail-closed, 허용 CIDR, `CF-Connecting-IP` 사용·`X-Forwarded-For` 무시, `/hubs/agent` 예외 |
+| `EnrollmentAndAuthTests` | 7 | enroll code 형식·정규화·1회 사용·만료 410, challenge/token 발급과 nonce 재사용 거부, 잘못된 서명 거부, Hub Hello 후 outbox 이벤트 seq 중복 제거 |
+| `AgentTokenServiceTests` | 4 | 토큰 round-trip, 만료, 변조 거부, 잘못된 형식 거부 |
+| `OutboxStoreTests` | 2 | append/ack/seq 조회, 재시작 후 seq 단조 증가 유지 |
+| `GoogleAuthPolicyTests` | 4 | 검증된 허용 이메일 통과, 미검증 이메일 거부, 빈 허용 목록 전원 거부, 미허용 이메일 거부 |
+| `AuthEndpointTests` | 1 | Google 미설정 시 `GET /api/v1/auth/login` → 503 `auth_unavailable` |
+| `ServerLinkSystemTests` | 2 | enroll → 최초 연결(Hello) → outbox flush·ack → 서버 재시작 후 재연결(`ConnectedCount >= 2`), `StopAsync` 중복 호출 무해 |
+
+### M3 DoD 실행 증거
+
+- `ServerLinkSystemTests`는 실제 Kestrel 서버와 SQLite DB를 띄우고, Client `ServerLinkSystem`이 challenge→token→Hub WebSocket→Hello→PushEvents 순서로 동작함을 확인했다. 서버 `LastAppliedEventSeq == 1`, Outbox 잔여 0을 대기 후 검증한다.
+- 서버를 같은 포트·같은 DB·같은 secret store로 재시작한 뒤 Client가 재연결(`ConnectedCount >= 2`)하는 것을 15초 내 확인한다. 최초 실패 원인은 테스트가 secret store를 공유하지 않아 재인증이 401로 거부된 것이었고, `InMemoryServerSecretStore`를 두 호스트에 공유해 수정했다.
+- GeoGate는 실제 미들웨어 파이프라인이 아니라 단위 테스트로 검증했다. thread-of-execution은 local port 우회 → 예외 경로 → edge port `CF-Connecting-IP` 파싱 → allowCidrs → allowCountries 순서다.
+- Rate limit은 enroll/challenge/token에 IP별 fixed window 5/min을 적용했고, 통합 테스트는 rate limit을 우회하도록 서비스를 직접 호출한다.
+
+### M3 한계와 후속
+
+- 실제 Google OIDC 로그인은 clientId/secret이 없어 검증하지 못했다. `/api/v1/auth/login`은 Google 미설정 시 503을 반환하고, 정책 판정은 `GoogleAuthPolicy` 단위 테스트로 대체한다.
+- GeoLite2 Country DB가 없어 실제 edge 판정은 fail-closed 403이다. 테스트는 fake `IGeoIpLookup`을 사용한다.
+- Client enroll CLI(`enroll --code`)는 프로세스로 직접 실행해 검증하지 않았다. CLI 로직은 enroll → machineId·`server.url` 저장 경로를 사용하며, `ServerLinkSystemTests`가 동일 저장소 경로를 검증한다.
+- 관리자 웹 UI, REST `{data, meta}`/`X-Trace-Id` envelope, `SnapshotRequired` 수신 시 스냅샷 처리, 라이브 outbox push(재연결 외 실시간 트리거)는 후속 범위다.
+
+## M4 MUST 테스트 검증 — 완료 (2026-10-20)
+
+Server REST Query/Command end-to-end와 Client 요청 처리·재보고를 구현하고, 실제 Kestrel·SignalR·SQLite를 사용하는 통합 테스트로 검증했다. 테스트 합계 269개(M3 263 + M4 신규 6), 실패 0, 경고 0.
+
+| 파일 | 개수 | 검증 내용 |
+|---|---|---|
+| `RequestPipelineTests` | 6 | live query와 `meta`/`X-Trace-Id`, 동일 query single-flight, Idempotency-Key command 재사용, offline query stale cache, Command 202 pending·조회, `command.issue` audit 기록 |
+
+### M4 DoD 실행 증거
+
+- `RemoteQueryService`는 `machineId|cacheKey` 기준 `SemaphoreSlim`으로 동일 query를 직렬화한다. 경합 요청은 선행 요청 완료 후 `query_cache.AsOf`가 대기 시작 시각보다 새로우면 재전송 없이 `source=live`, `stale=false`로 응답한다. 통합 테스트에서 동시 요청 2건의 Agent `RequestCount`가 1임을 확인했다.
+- Query는 Ack 없이 `Response`를 기다리고, Command는 `Ack` 후 `Response`를 기다린다. Command Ack timeout은 10초·최대 3회 재전송이며, 응답 대기 기본값은 `requests.commandTimeout`(30초)이다. `session.abort`/`session.prompt` 15초, `session.abort_and_prompt` 30초, `vpn.connect` 120초, `vpn.disconnect` 30초를 타입별 기본값으로 적용한다.
+- Command가 offline이면 503 `machine_offline`, Ack가 없으면 504 `agent_no_ack`을 반환한다. Query는 offline/timeout 시 `query_cache`가 있으면 `source=cache`, `stale=true`로 200을 반환한다.
+- Command/Query requestId는 ULID를 사용하고 `X-Request-Id`로 재사용할 수 있다. `X-Trace-Id` 응답 헤더와 `meta.traceId`를 함께 기록한다.
+- `Idempotency-Key`는 사용자·키 기준으로 기존 command를 재사용하며 최대 128자다. 24시간 후 정리 작업은 아직 없다.
+- SQLite가 `DateTimeOffset` ORDER BY를 지원하지 않아 `ListAuditAsync`/`ListCommandsAsync`는 `Id` 내림차순으로 정렬한다. `from`/`to` 시간 필터는 아직 통합 테스트로 검증하지 않았다.
+
+### M4 한계와 후속
+
+- `GET /machines`의 `instances`, `workspaces`, `features`, `health`는 DB 기반 빈 값이다. live query 집계는 M5에서 연결한다.
+- `GET /machines/{id}/features`는 machine-scoped feature 값이 아니라 `/sessions`, `/commands` 같은 route 목록을 반환한다. 프론트엔드는 키 기반으로 정규화해야 한다.
+- Client query handler는 `session.diff`, workspace, client logs를 아직 구현하지 않았다. Server `/logs/server`는 테스트 호스트에서 `AcLog`가 초기화되지 않아 빈 목록을 반환한다.
+- 실제 네트워크 차단 후 자동 복구 E2E, `SnapshotRequired` 처리, 라이브 outbox push는 M5 이후 범위다.
+- 관리자 웹 UI와 정적 `dist` 서빙은 M5 범위다.
+
+## M5 진행 — 정적 서빙·UiHub·stream (2026-10-20)
+
+`web/ai-ctrl-web`의 Vite 빌드 산출물을 Server가 같은 origin으로 서빙하는 기반, UiHub의 연결/그룹 배선, `SessionStreamHub` ring buffer와 REST long-poll을 추가했다. 테스트 합계 281개(M4 269 + M5 신규 12), 실패 0, 경고 0.
+
+| 파일 | 개수 | 검증 내용 |
+|---|---|---|
+| `WebAppTests` | 3 | `/`와 SPA 하위 경로가 `index.html` 반환, `/assets/*` 정적 파일 반환, 미매칭 `/api/*`는 index로 fallback하지 않고 404 |
+| `UiHubTests` | 3 | 미인증 negotiate는 로그인으로 redirect, 인증 연결 시 `FleetSnapshot` 수신, `WatchSession` 그룹으로 보낸 `StreamChunks` 수신, 미구독 연결은 chunk 미수신 |
+| `SessionStreamTests` | 5 | publish/read cursor 왕복, long-poll wake, epoch 변경 시 이전 cursor 만료, stale epoch·중복 seq 무시, REST stream 응답과 `meta.stale` |
+| `SessionStreamRingTests` | 1 | ring 크기 제한으로 오래된 chunk 제거, ring 이전 cursor는 `CursorExpired`로 표시 |
+
+- `WebApp.ResolveDistPath`는 `web:distPath` 설정이 있으면 해당 경로를, 없으면 `{contentRoot}/web/ai-ctrl-web/dist`와 `{AppContext.BaseDirectory}/wwwroot` 순서로 `index.html`이 있는 디렉터리를 찾는다.
+- `UseAcWebApp`는 `UseDefaultFiles`/`UseStaticFiles`와 SPA fallback을 등록한다. fallback은 `/api`와 `/hubs` 경로를 제외한다.
+- `web/ai-ctrl-web`에서 `npm run build`가 성공했고 `dist/index.html`, `dist/assets/*.js`, `dist/assets/*.css`가 생성되는 것을 확인했다.
+- `/hubs/ui` UiHub는 쿠키 인증, 연결 직후 `FleetSnapshot`, `WatchSession`/`UnwatchSession` 그룹 배선까지 구현했다. chunk는 `SessionStreamHub.PublishAsync`가 `s:{machineId}:{sessionId}` 그룹으로 broadcast한다.
+- `SessionStreamHub`는 cursor `{epoch}:{seq}` 기준으로 ring snapshot/증분을 반환하고, epoch 증가 시 ring을 초기화하며, `Seq` 역행·중복 chunk를 버린다. ring은 2000 chunk/1 MiB, long-poll 최대 25초, idle 10분 후 제거하며 hosted sweeper가 1분마다 정리한다.
+- `GET /api/v1/machines/{machineId}/sessions/{sessionId}/stream?cursor=&waitMs=`를 추가했다. cursor 없이 호출하면 ring snapshot, epoch 불일치·ring 이전 cursor는 `cursorExpired=true`와 snapshot을 반환하고 `meta.stale`도 true가 된다.
+- `AgentHub.PushStream`은 연결 machine과 batch machine이 다르면 거부하고, 일치하면 `SessionStreamHub`에 publish한다.
+- 설정 키는 `streams:ringChunks`, `ringBytes`, `idleDropMinutes`, `longPollMaxMs`, `leaseSeconds`다.
+- 아직 StreamSystem(Client), watch lease/`SetWatchedSessions` 집계, Command/Session/Vpn 이벤트 broadcast는 구현하지 않았다. 프론트엔드는 stream 외 데이터를 polling으로 조회한다.

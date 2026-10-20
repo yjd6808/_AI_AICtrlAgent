@@ -49,7 +49,13 @@ public sealed class CommandSystem
         _logger = logger;
     }
 
-    public async Task<CommandResult> ExecuteAsync(CommandEnvelope envelope, CancellationToken ct)
+    public Task<CommandResult> ExecuteAsync(CommandEnvelope envelope, CancellationToken ct) =>
+        ExecuteAsync(envelope, onAcknowledged: null, ct);
+
+    public async Task<CommandResult> ExecuteAsync(
+        CommandEnvelope envelope,
+        Func<CancellationToken, Task>? onAcknowledged,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(envelope);
 
@@ -58,7 +64,7 @@ public sealed class CommandSystem
             var completion = new TaskCompletionSource<CommandResult>(TaskCreationOptions.RunContinuationsAsynchronously);
             if (_inFlight.TryAdd(envelope.CommandId, completion.Task))
             {
-                _ = RunOwnerAsync(envelope, completion, ct);
+                _ = RunOwnerAsync(envelope, completion, onAcknowledged, ct);
                 return await completion.Task.WaitAsync(ct).ConfigureAwait(false);
             }
 
@@ -94,6 +100,7 @@ public sealed class CommandSystem
     private async Task RunOwnerAsync(
         CommandEnvelope envelope,
         TaskCompletionSource<CommandResult> completion,
+        Func<CancellationToken, Task>? onAcknowledged,
         CancellationToken ct)
     {
         try
@@ -103,6 +110,18 @@ public sealed class CommandSystem
             {
                 completion.TrySetResult(Replay(created.Entry));
                 return;
+            }
+
+            if (onAcknowledged is not null)
+            {
+                try
+                {
+                    await onAcknowledged(ct).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogWarning(ex, "Command {CommandId} acknowledgement callback failed.", envelope.CommandId);
+                }
             }
 
             await _journal

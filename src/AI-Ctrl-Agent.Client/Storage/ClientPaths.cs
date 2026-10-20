@@ -10,5 +10,7 @@ public static class ClientPaths
 
     public static string LocalTokenPath => Path.Combine(DataDirectory, "local-token");
 
+    public static string SecretsPath => Path.Combine(DataDirectory, "secrets.bin");
+
     public static void EnsureDataDirectory() => Directory.CreateDirectory(DataDirectory);
 }

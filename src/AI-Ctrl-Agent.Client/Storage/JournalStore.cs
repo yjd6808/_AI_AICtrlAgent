@@ -84,6 +84,67 @@ public sealed class JournalStore
         return await ReadAsync(connection, commandId, ct).ConfigureAwait(false);
     }
 
+    public async Task<IReadOnlyList<string>> GetOpenIdsAsync(CancellationToken ct)
+    {
+        await using var connection = await _db.OpenAsync(ct).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT command_id
+            FROM journal
+            WHERE status IN ($acknowledged, $running)
+            ORDER BY received_at;
+            """;
+        command.Parameters.AddWithValue("$acknowledged", (int)CommandStatus.Acknowledged);
+        command.Parameters.AddWithValue("$running", (int)CommandStatus.Running);
+
+        var ids = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            ids.Add(reader.GetString(0));
+        }
+
+        return ids;
+    }
+
+    public async Task<IReadOnlyList<JournalEntry>> GetUnreportedTerminalAsync(int limit, CancellationToken ct)
+    {
+        await using var connection = await _db.OpenAsync(ct).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT {SelectColumns}
+            FROM journal
+            WHERE reported = 0
+              AND status IN ($succeeded, $failed, $cancelled, $expired, $unknown)
+            ORDER BY received_at
+            LIMIT $limit;
+            """;
+        command.Parameters.AddWithValue("$succeeded", (int)CommandStatus.Succeeded);
+        command.Parameters.AddWithValue("$failed", (int)CommandStatus.Failed);
+        command.Parameters.AddWithValue("$cancelled", (int)CommandStatus.Cancelled);
+        command.Parameters.AddWithValue("$expired", (int)CommandStatus.Expired);
+        command.Parameters.AddWithValue("$unknown", (int)CommandStatus.Unknown);
+        command.Parameters.AddWithValue("$limit", Math.Clamp(limit, 1, 500));
+
+        var entries = new List<JournalEntry>();
+        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            entries.Add(ReadEntry(reader));
+        }
+
+        return entries;
+    }
+
+    public async Task MarkReportedAsync(string commandId, CancellationToken ct)
+    {
+        await using var connection = await _db.OpenAsync(ct).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE journal SET reported = 1 WHERE command_id = $id;";
+        command.Parameters.AddWithValue("$id", commandId);
+        await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
     public async Task<JournalEntry> UpdateAsync(
         string commandId,
         CommandStatus status,

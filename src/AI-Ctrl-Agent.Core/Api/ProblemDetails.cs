@@ -54,6 +54,8 @@ public static class AcErrorCodes
 
     public const string QueryTimeout = "query_timeout";
 
+    public const string QueryFailed = "query_failed";
+
     public const string WorkspaceNotAllowed = "workspace_not_allowed";
 
     public const string SessionNotFound = "session_not_found";
@@ -73,4 +75,24 @@ public static class AcErrorCodes
     public const string Unauthorized = "unauthorized";
 
     public const string InvalidHost = "invalid_host";
+
+    public const string InvalidCode = "invalid_code";
+
+    public const string EnrollmentExpired = "enrollment_expired";
+
+    public const string MachineRevoked = "machine_revoked";
+
+    public const string InvalidSignature = "invalid_signature";
+
+    public const string ChallengeExpired = "challenge_expired";
+
+    public const string MachineNotFound = "machine_not_found";
+
+    public const string UnsupportedProtocol = "unsupported_protocol";
+
+    public const string MachineReplaced = "machine_replaced";
+
+    public const string AuthUnavailable = "auth_unavailable";
+
+    public const string EmailNotAllowed = "email_not_allowed";
 }

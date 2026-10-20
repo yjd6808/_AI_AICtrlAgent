@@ -1,33 +1,19 @@
-using AiCtrl.Core.Config;
-using AiCtrl.Core.Logging;
-using AiCtrl.Core.Runtime;
+using AiCtrl.Server;
+using AiCtrl.Server.Security;
 
-var builder = WebApplication.CreateBuilder(args);
+if (ServerSecretsCli.IsCommand(args))
+{
+    return ServerSecretsCli.Run(args);
+}
 
-var serverConfigPath = AcDefaultConfigs.DefaultServerConfigPath;
 try
 {
-    AcDefaultConfigs.EnsureFile(serverConfigPath, AcDefaultConfigs.ServerYaml);
+    var app = ServerSetup.BuildAcServer(args);
+    await app.RunAsync().ConfigureAwait(false);
+    return 0;
 }
 catch (Exception ex)
 {
-    Console.Error.WriteLine($"설정 파일 준비 실패: {serverConfigPath} — {ex.Message}");
-    return 2;
+    Console.Error.WriteLine($"Server 시작 실패: {ex.Message}");
+    return 1;
 }
-
-builder.Configuration.AddAcYamlFile(serverConfigPath);
-builder.Configuration.AddAcYamlFile(AcDefaultConfigs.OverridesPathFor(serverConfigPath), optional: true);
-builder.Configuration.AddAcEnvironmentVariables();
-
-var logOptions = AcLogBootstrap.ReadOptions(builder.Configuration);
-AcLog.Initialize("Server", logOptions);
-builder.Logging.AddAcLog(logOptions);
-
-builder.Services.AddAcRuntime();
-
-var app = builder.Build();
-
-app.MapGet("/", () => "AI-Ctrl-Agent Server");
-
-app.Run();
-return 0;

@@ -12,6 +12,9 @@ public sealed class AcLoopSupervisor : IAsyncDisposable
     private readonly CancellationTokenSource _cts;
     private readonly List<Task> _tasks = new();
     private readonly object _gate = new();
+    private readonly object _stopGate = new();
+    private Task? _stopTask;
+    private int _disposed;
 
     public AcLoopSupervisor(TimeProvider time, ILoggerFactory loggerFactory, CancellationToken lifetime = default)
     {
@@ -39,7 +42,25 @@ public sealed class AcLoopSupervisor : IAsyncDisposable
         }
     }
 
-    public async ValueTask StopAsync()
+    public ValueTask StopAsync()
+    {
+        lock (_stopGate)
+        {
+            _stopTask ??= StopCoreAsync();
+            return new ValueTask(_stopTask);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await StopAsync().ConfigureAwait(false);
+        if (Interlocked.Exchange(ref _disposed, 1) == 0)
+        {
+            _cts.Dispose();
+        }
+    }
+
+    private async Task StopCoreAsync()
     {
         _cts.Cancel();
 
@@ -56,12 +77,6 @@ public sealed class AcLoopSupervisor : IAsyncDisposable
         catch (OperationCanceledException)
         {
         }
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        await StopAsync().ConfigureAwait(false);
-        _cts.Dispose();
     }
 
     private async Task RunCoreAsync(string name, Func<CancellationToken, ValueTask> body, CancellationToken token)

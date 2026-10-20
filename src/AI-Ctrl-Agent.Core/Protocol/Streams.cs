@@ -24,3 +24,10 @@ public sealed record StreamBatch(
     string SessionId,
     long Epoch,
     IReadOnlyList<StreamChunk> Chunks);
+
+public sealed record StreamReadView(
+    string SessionId,
+    long Epoch,
+    string NextCursor,
+    bool CursorExpired,
+    IReadOnlyList<StreamChunk> Chunks);

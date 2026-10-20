@@ -103,6 +103,68 @@ public sealed class ClientDb
         return await ReadMachineIdAsync(connection, ct).ConfigureAwait(false) ?? generated;
     }
 
+    public async Task<MachineId?> GetMachineIdAsync(CancellationToken ct)
+    {
+        await using var connection = await OpenAsync(ct).ConfigureAwait(false);
+        return await ReadMachineIdAsync(connection, ct).ConfigureAwait(false);
+    }
+
+    public async Task SetMachineIdAsync(MachineId machineId, bool enrolled, CancellationToken ct)
+    {
+        await using var connection = await OpenAsync(ct).ConfigureAwait(false);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+        var now = _time.GetUtcNow().ToString("O", CultureInfo.InvariantCulture);
+        await SetValueAsync(connection, transaction, "machine_id", machineId.Value, now, ct).ConfigureAwait(false);
+        await SetValueAsync(connection, transaction, "enrolled", enrolled ? "true" : "false", now, ct).ConfigureAwait(false);
+        await transaction.CommitAsync(ct).ConfigureAwait(false);
+    }
+
+    public async Task<bool> IsEnrolledAsync(CancellationToken ct) =>
+        string.Equals(await GetValueAsync("enrolled", ct).ConfigureAwait(false), "true", StringComparison.Ordinal);
+
+    public async Task<string?> GetValueAsync(string key, CancellationToken ct)
+    {
+        await using var connection = await OpenAsync(ct).ConfigureAwait(false);
+        await using var select = connection.CreateCommand();
+        select.CommandText = "SELECT value FROM kv WHERE key = $key;";
+        select.Parameters.AddWithValue("$key", key);
+        return await select.ExecuteScalarAsync(ct).ConfigureAwait(false) as string;
+    }
+
+    public async Task SetValueAsync(string key, string value, CancellationToken ct)
+    {
+        await using var connection = await OpenAsync(ct).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO kv (key, value, updated_at) VALUES ($key, $value, $now)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at;
+            """;
+        command.Parameters.AddWithValue("$key", key);
+        command.Parameters.AddWithValue("$value", value);
+        command.Parameters.AddWithValue("$now", _time.GetUtcNow().ToString("O", CultureInfo.InvariantCulture));
+        await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    private static async Task SetValueAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string key,
+        string value,
+        string now,
+        CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO kv (key, value, updated_at) VALUES ($key, $value, $now)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at;
+            """;
+        command.Parameters.AddWithValue("$key", key);
+        command.Parameters.AddWithValue("$value", value);
+        command.Parameters.AddWithValue("$now", now);
+        await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
     private static async Task<MachineId?> ReadMachineIdAsync(SqliteConnection connection, CancellationToken ct)
     {
         await using var select = connection.CreateCommand();

@@ -1,4 +1,7 @@
 using AiCtrl.Client.Commands;
+using AiCtrl.Client.Link;
+using AiCtrl.Client.Providers.OpenCode.Backend;
+using AiCtrl.Client.Security;
 using AiCtrl.Client.Storage;
 using AiCtrl.Client.Systems;
 using AiCtrl.Core.Config;
@@ -8,7 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-var builder = Host.CreateApplicationBuilder(args);
+var builder = Host.CreateApplicationBuilder();
 
 var clientConfigPath = AcDefaultConfigs.DefaultClientConfigPath;
 try
@@ -17,7 +20,7 @@ try
 }
 catch (Exception ex)
 {
-    Console.Error.WriteLine($"설정 파일 준비 실패: {clientConfigPath} — {ex.Message}");
+    Console.Error.WriteLine($"설정 파일 준비 실패: {clientConfigPath} - {ex.Message}");
     return 2;
 }
 
@@ -28,6 +31,12 @@ builder.Configuration.AddAcEnvironmentVariables();
 var logOptions = AcLogBootstrap.ReadOptions(builder.Configuration);
 AcLog.Initialize("Client", logOptions);
 builder.Logging.AddAcLog(logOptions);
+
+if (args.Length > 0 && string.Equals(args[0], "enroll", StringComparison.OrdinalIgnoreCase))
+{
+    return await EnrollmentCli.RunAsync(args.Skip(1).ToArray(), builder.Configuration, CancellationToken.None).ConfigureAwait(false);
+}
+
 builder.Services.AddAcRuntime();
 
 var ct = CancellationToken.None;
@@ -35,18 +44,30 @@ var time = TimeProvider.System;
 ClientPaths.EnsureDataDirectory();
 
 var clientDb = new ClientDb(ClientPaths.DatabasePath, time);
-await clientDb.InitializeAsync(ct);
-var machineId = await clientDb.GetOrCreateMachineIdAsync(ct);
+await clientDb.InitializeAsync(ct).ConfigureAwait(false);
+var machineId = await clientDb.IsEnrolledAsync(ct).ConfigureAwait(false)
+    ? await clientDb.GetMachineIdAsync(ct).ConfigureAwait(false) ?? await clientDb.GetOrCreateMachineIdAsync(ct).ConfigureAwait(false)
+    : await clientDb.GetOrCreateMachineIdAsync(ct).ConfigureAwait(false);
 var journal = new JournalStore(clientDb);
-await journal.RecoverInterruptedAsync(time.GetUtcNow(), ct);
+await journal.RecoverInterruptedAsync(time.GetUtcNow(), ct).ConfigureAwait(false);
 
 var registry = new ProviderInstanceRegistry(machineId);
 var monitorOptions = MonitorOptions.FromConfiguration(builder.Configuration);
 var providerHostOptions = ProviderHostOptions.FromConfiguration(builder.Configuration);
 var localApiOptions = LocalApiOptions.FromConfiguration(builder.Configuration);
+var serverLinkOptions = ServerLinkOptions.FromConfiguration(builder.Configuration);
+var secrets = new DpapiSecretStore(ClientPaths.SecretsPath);
+var deviceKeys = new DeviceKeyStore(secrets);
+var outbox = new OutboxStore(clientDb, time);
+var network = new NetworkChangeSignal();
 
 builder.Services.AddSingleton(clientDb);
 builder.Services.AddSingleton(journal);
+builder.Services.AddSingleton<ISecretStore>(secrets);
+builder.Services.AddSingleton(deviceKeys);
+builder.Services.AddSingleton(outbox);
+builder.Services.AddSingleton(serverLinkOptions);
+builder.Services.AddSingleton<INetworkChangeSignal>(network);
 builder.Services.AddSingleton<IProviderInstanceRegistry>(registry);
 builder.Services.AddSingleton(sp => new SessionActorPool(sp.GetRequiredService<ILoggerFactory>()));
 builder.Services.AddSingleton(sp => new AbortAndPromptRunner(
@@ -64,6 +85,7 @@ builder.Services.AddSingleton(sp => new CommandSystem(
 builder.Services.AddSingleton(sp => new ProviderHostSystem(
     registry,
     providerHostOptions,
+    sp.GetRequiredService<ISecretStore>(),
     time,
     sp.GetRequiredService<ILoggerFactory>()));
 builder.Services.AddSingleton(sp => new MonitorSystem(
@@ -82,11 +104,28 @@ builder.Services.AddSingleton(sp => new LocalApiSystem(
     localApiOptions,
     time,
     sp.GetRequiredService<ILoggerFactory>()));
+builder.Services.AddSingleton(sp => new ClientRequestHandler(
+    sp.GetRequiredService<CommandSystem>(),
+    journal,
+    registry,
+    sp.GetRequiredService<StateSystem>(),
+    time,
+    sp.GetRequiredService<ILogger<ClientRequestHandler>>()));
+builder.Services.AddSingleton(sp => new ServerLinkSystem(
+    clientDb,
+    sp.GetRequiredService<DeviceKeyStore>(),
+    sp.GetRequiredService<OutboxStore>(),
+    sp.GetRequiredService<ClientRequestHandler>(),
+    serverLinkOptions,
+    sp.GetRequiredService<INetworkChangeSignal>(),
+    time,
+    sp.GetRequiredService<ILogger<ServerLinkSystem>>()));
 
 builder.Services.AddSingleton<IAcSystem>(sp => sp.GetRequiredService<ProviderHostSystem>());
 builder.Services.AddSingleton<IAcSystem>(sp => sp.GetRequiredService<MonitorSystem>());
 builder.Services.AddSingleton<IAcSystem>(sp => sp.GetRequiredService<StateSystem>());
 builder.Services.AddSingleton<IAcSystem>(sp => sp.GetRequiredService<LocalApiSystem>());
+builder.Services.AddSingleton<IAcSystem>(sp => sp.GetRequiredService<ServerLinkSystem>());
 
 var host = builder.Build();
 await host.RunAsync();

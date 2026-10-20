@@ -57,6 +57,8 @@ public sealed class ProviderHostSystem : IAcSystem
 
     private readonly ILogger<ProviderHostSystem> _logger;
 
+    private readonly ISecretStore _secrets;
+
     private readonly List<IProviderInstance> _owned = new();
 
     private HttpClient? _http;
@@ -68,15 +70,18 @@ public sealed class ProviderHostSystem : IAcSystem
     public ProviderHostSystem(
         ProviderInstanceRegistry registry,
         ProviderHostOptions options,
+        ISecretStore secrets,
         TimeProvider time,
         ILoggerFactory logs)
     {
         ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(secrets);
         ArgumentNullException.ThrowIfNull(time);
         ArgumentNullException.ThrowIfNull(logs);
         _registry = registry;
         _options = options;
+        _secrets = secrets;
         _time = time;
         _logs = logs;
         _logger = logs.CreateLogger<ProviderHostSystem>();
@@ -96,9 +101,12 @@ public sealed class ProviderHostSystem : IAcSystem
     {
         var ctx = _ctx ?? throw new InvalidOperationException("InitAsync must be called before StartAsync.");
         var endpoint = $"http://{_options.Host}:{_options.Port}";
-        var password = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
-        var secrets = new InMemorySecretStore();
-        await secrets.SaveAsync(PasswordKey, password, ct).ConfigureAwait(false);
+        var password = await _secrets.LoadAsync(PasswordKey, ct).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(password))
+        {
+            password = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+            await _secrets.SaveAsync(PasswordKey, password, ct).ConfigureAwait(false);
+        }
 
         _http = new HttpClient { BaseAddress = new Uri(endpoint), Timeout = TimeSpan.FromSeconds(5) };
         var probe = new HttpBackendHealthProbe(_http, HealthPath, Username, password);
@@ -115,7 +123,7 @@ public sealed class ProviderHostSystem : IAcSystem
                     ["OPENCODE_SERVER_PASSWORD"] = controllerPassword,
                 }),
             probe,
-            secrets,
+            _secrets,
             _time,
             _logs.CreateLogger<OpenCodeBackendSupervisor>());
 
