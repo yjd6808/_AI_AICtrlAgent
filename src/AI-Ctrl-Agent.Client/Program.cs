@@ -88,9 +88,18 @@ builder.Services.AddSingleton(sp => new ProviderHostSystem(
     sp.GetRequiredService<ISecretStore>(),
     time,
     sp.GetRequiredService<ILoggerFactory>()));
+builder.Services.AddSingleton<ProviderEventBroker>();
+builder.Services.AddSingleton<AgentPushChannel>();
 builder.Services.AddSingleton(sp => new MonitorSystem(
     registry,
     monitorOptions,
+    time,
+    sp.GetRequiredService<ILoggerFactory>(),
+    events: sp.GetRequiredService<ProviderEventBroker>()));
+builder.Services.AddSingleton(sp => new StreamSystem(
+    registry,
+    sp.GetRequiredService<ProviderEventBroker>(),
+    sp.GetRequiredService<AgentPushChannel>(),
     time,
     sp.GetRequiredService<ILoggerFactory>()));
 builder.Services.AddSingleton(sp => new StateSystem(
@@ -116,6 +125,8 @@ builder.Services.AddSingleton(sp => new ServerLinkSystem(
     sp.GetRequiredService<DeviceKeyStore>(),
     sp.GetRequiredService<OutboxStore>(),
     sp.GetRequiredService<ClientRequestHandler>(),
+    sp.GetRequiredService<StreamSystem>(),
+    sp.GetRequiredService<AgentPushChannel>(),
     serverLinkOptions,
     sp.GetRequiredService<INetworkChangeSignal>(),
     time,
@@ -123,6 +134,7 @@ builder.Services.AddSingleton(sp => new ServerLinkSystem(
 
 builder.Services.AddSingleton<IAcSystem>(sp => sp.GetRequiredService<ProviderHostSystem>());
 builder.Services.AddSingleton<IAcSystem>(sp => sp.GetRequiredService<MonitorSystem>());
+builder.Services.AddSingleton<IAcSystem>(sp => sp.GetRequiredService<StreamSystem>());
 builder.Services.AddSingleton<IAcSystem>(sp => sp.GetRequiredService<StateSystem>());
 builder.Services.AddSingleton<IAcSystem>(sp => sp.GetRequiredService<LocalApiSystem>());
 builder.Services.AddSingleton<IAcSystem>(sp => sp.GetRequiredService<ServerLinkSystem>());

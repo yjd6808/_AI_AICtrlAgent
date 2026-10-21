@@ -173,4 +173,26 @@ Server REST Query/Command end-to-end와 Client 요청 처리·재보고를 구�
 - `GET /api/v1/machines/{machineId}/sessions/{sessionId}/stream?cursor=&waitMs=`를 추가했다. cursor 없이 호출하면 ring snapshot, epoch 불일치·ring 이전 cursor는 `cursorExpired=true`와 snapshot을 반환하고 `meta.stale`도 true가 된다.
 - `AgentHub.PushStream`은 연결 machine과 batch machine이 다르면 거부하고, 일치하면 `SessionStreamHub`에 publish한다.
 - 설정 키는 `streams:ringChunks`, `ringBytes`, `idleDropMinutes`, `longPollMaxMs`, `leaseSeconds`다.
-- 아직 StreamSystem(Client), watch lease/`SetWatchedSessions` 집계, Command/Session/Vpn 이벤트 broadcast는 구현하지 않았다. 프론트엔드는 stream 외 데이터를 polling으로 조회한다.
+- StreamSystem(Client), watch lease/`SetWatchedSessions` 집계는 아래 M5 보강에서 구현했다. Command/Session/Vpn 이벤트 broadcast는 아직 범위가 아니다.
+
+## M5 보강 — watch lease·Client StreamSystem (2026-10-21)
+
+Server의 UI watch 집계와 Client의 `StreamSystem`을 연결해, UI가 구독 중인 세션에 대해서만 Client가 provider 이벤트를 chunk로 전송하도록 구현했다. `message.part.delta` 증분 스트리밍과 full update 중복 방지도 포함한다. 테스트 합계 308개(기존 281 + watch 5 + Client stream 22), 실패 0, 경고 0.
+
+| 파일 | 개수 | 검증 내용 |
+|---|---|---|
+| `SessionWatchTests` | 5 | REST lease 만료, 만료 직후 재-touch 시 재활성화, UI watch가 REST 만료 뒤에도 유지, UI connection 제거 시 group 해제, Hello 직후 `SetWatchedSessions` 전송과 Unwatch 빈 배열 |
+| `StreamSystemTests` | 12 | assistant text Replace/Append/PartDone, `message.part.delta` 증분 스트리밍, full update·delta 중복 방지, user delta 무시, user·미구독 세션 무시, 역할 미확인 text 스트리밍, 재-watch epoch 증가·seq 초기화, lease 만료 차단, `ClearWatches` pending 폐기, 4000자 chunk 분할·복원, tool 상태/완료 1회, 두 세션 batch 분리 |
+| `ProviderEventBrokerTests` | 3 | 전체 subscriber 전달, subscriber 예외 격리, 구독 해제 |
+| `AgentPushChannelTests` | 5 | 미연결 false, attach 전송, sender 예외 false, 일치하는 sender만 detach, 호출자 취소 전파 |
+| `MonitorSystemTests` | 7 | 기존 6개 + provider 이벤트 broker publish |
+| `ServerLinkSystemTests` | 3 | 기존 2개 + UI watch → `SetWatchedSessions` → Client `StreamSystem` → `PushStream` → Server ring end-to-end |
+
+- Server `SessionWatchRegistry`는 `(machineId, sessionId)` 단위로 UI connection과 REST lease를 함께 저장한다. `SessionWatchCoordinator`는 1초마다 만료를 정리하고 30초 heartbeat로 `SetWatchedSessions`를 재전송하며, watch 변경·해제 시 즉시 같은 payload를 보낸다.
+- `UiHub.WatchSession`/`UnwatchSession`과 `OnDisconnectedAsync`, REST stream 조회의 `TouchRestAsync`가 watch 상태를 갱신한다. `AgentHub.Hello`는 연결 직후 해당 connection에 현재 watch 목록을 보낸다.
+- Client `ProviderEventBroker`는 `MonitorSystem`이 provider 이벤트를 성공적으로 처리한 뒤 publish한다. `StreamSystem`은 자기 machine과 유효한 sessionId만 watch하고, assistant text는 첫 chunk를 `Replace`, prefix 확장은 `Append`, 종료 시 `PartDone`으로 보낸다. reasoning/tool도 동일한 part 단위 규칙을 사용한다.
+- OpenCode 1.18.34는 초기 `message.part.updated`, 스트리밍 중 `message.part.delta`(`field: "text"`), 종료 시 누적 text를 담은 `message.part.updated`를 보낸다. `StreamSystem`은 delta를 `Append`로 반영하고, 직전 full update에 이미 포함된 첫 delta는 접미사 일치로 1회 건너뛰며, delta 구간의 중간 full text update는 중복 방지를 위해 무시한다. 종료 full update는 누적 text를 재조정한 뒤 `PartDone`을 보낸다.
+- `StreamSystem` epoch는 Client 시각(Unix ms)을 기준으로 시작해 프로세스 재시작 후에도 Server의 이전 epoch보다 크게 유지한다. 재-watch/lease 만료 후 재개 시 epoch를 증가시키고 seq를 1부터 다시 센다.
+- text는 UTF-8 기준 안전을 위해 4000자 단위로 나누며 surrogate pair 경계를 보정한다. flush는 100ms 주기로 session별 `StreamBatch`를 만들고 `AgentPushChannel`로 `PushStream`을 호출한다.
+- `ServerLinkSystem`은 `SetWatchedSessions` 수신, 연결 후 push sender attach, 연결 종료 시 detach·`ClearWatches`를 담당한다. push는 기존 방침대로 best-effort이며 Outbox를 거치지 않는다.
+- 검증: `dotnet build AI-Ctrl-Agent.sln --nologo -v:q` 경고 0/오류 0, `dotnet test AI-Ctrl-Agent.sln --nologo --no-build` 308/308 통과. `ServerLinkSystemTests`의 end-to-end 테스트는 실제 Kestrel·SignalR·SQLite 환경에서 watch lease가 Client까지 도달한 뒤 provider text가 Server ring에 `Replace` chunk로 저장되는 것을 확인한다.

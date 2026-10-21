@@ -22,6 +22,8 @@ public sealed class StreamOptions
 
     public TimeSpan LongPollMax => TimeSpan.FromMilliseconds(Math.Clamp(LongPollMaxMs, 0, 25000));
 
+    public int EffectiveLeaseSeconds => Math.Clamp(LeaseSeconds, 1, 300);
+
     public static StreamOptions FromConfiguration(IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);

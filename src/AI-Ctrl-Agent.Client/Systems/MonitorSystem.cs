@@ -18,6 +18,7 @@ public sealed class MonitorSystem : IAcSystem
     private readonly ErrorClassifier _classifier;
     private readonly AiOutputLog _aiOutput;
     private readonly ILogger _logger;
+    private readonly ProviderEventBroker? _events;
     private readonly ConcurrentDictionary<SessionRef, SessionWatch> _watches = new();
     private AcSystemContext? _ctx;
 
@@ -26,7 +27,8 @@ public sealed class MonitorSystem : IAcSystem
         MonitorOptions options,
         TimeProvider time,
         ILoggerFactory logs,
-        ErrorClassifier? classifier = null)
+        ErrorClassifier? classifier = null,
+        ProviderEventBroker? events = null)
     {
         _registry = registry;
         _options = options;
@@ -34,6 +36,7 @@ public sealed class MonitorSystem : IAcSystem
         _classifier = classifier ?? new ErrorClassifier();
         _logger = logs.CreateLogger<MonitorSystem>();
         _aiOutput = new AiOutputLog(logs.CreateLogger("AiOutput"), options);
+        _events = events;
     }
 
     public string Name => "monitor";
@@ -73,6 +76,7 @@ public sealed class MonitorSystem : IAcSystem
             try
             {
                 await HandleEventAsync(instance, providerEvent, ct).ConfigureAwait(false);
+                _events?.Publish(instance, providerEvent);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {

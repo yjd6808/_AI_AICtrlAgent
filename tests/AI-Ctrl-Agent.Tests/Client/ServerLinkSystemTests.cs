@@ -1,3 +1,4 @@
+using System.Text.Json;
 using AiCtrl.Client.Commands;
 using AiCtrl.Client.Link;
 using AiCtrl.Client.Security;
@@ -6,8 +7,11 @@ using AiCtrl.Client.Systems;
 using AiCtrl.Core.Domain;
 using AiCtrl.Core.Providers;
 using AiCtrl.Core.Protocol;
+using AiCtrl.Core.Runtime;
+using AiCtrl.Server.Hubs;
 using AiCtrl.Server.Persistence;
 using AiCtrl.Server.Security;
+using AiCtrl.Server.Streams;
 using AiCtrl.Tests.Server;
 using AiCtrl.Tests.Systems;
 using Microsoft.Data.Sqlite;
@@ -35,6 +39,20 @@ public sealed class ServerLinkSystemTests : IAsyncLifetime
 
     private SessionActorPool _actors = null!;
 
+    private StreamSystem _streams = null!;
+
+    private AgentPushChannel _push = null!;
+
+    private ProviderEventBroker _events = null!;
+
+    private FakeProviderInstance _instance = null!;
+
+    private FakeProviderInstanceRegistry _registry = null!;
+
+    private AcLoopSupervisor? _loops;
+
+    private ServiceProvider? _services;
+
     public async ValueTask InitializeAsync()
     {
         _host = await TestServerHost.StartAsync(_directory, _secrets);
@@ -57,7 +75,8 @@ public sealed class ServerLinkSystemTests : IAsyncLifetime
         await _db.SetValueAsync("server.url", _host.BaseUrl, ct);
         var journal = new JournalStore(_db);
         _actors = new SessionActorPool(NullLoggerFactory.Instance);
-        var registry = new FakeProviderInstanceRegistry(machineId, Array.Empty<IProviderInstance>());
+        _instance = new FakeProviderInstance();
+        _registry = new FakeProviderInstanceRegistry(machineId, new[] { _instance });
         var runner = new AbortAndPromptRunner(
             new AbortAndPromptOptions(
                 TimeSpan.FromMilliseconds(10),
@@ -69,7 +88,7 @@ public sealed class ServerLinkSystemTests : IAsyncLifetime
         var commands = new CommandSystem(
             journal,
             _actors,
-            registry,
+            _registry,
             runner,
             TimeProvider.System,
             NullLogger<CommandSystem>.Instance);
@@ -77,15 +96,25 @@ public sealed class ServerLinkSystemTests : IAsyncLifetime
         var requests = new ClientRequestHandler(
             commands,
             journal,
-            registry,
+            _registry,
             state,
             TimeProvider.System,
             NullLogger<ClientRequestHandler>.Instance);
+        _events = new ProviderEventBroker(NullLogger<ProviderEventBroker>.Instance);
+        _push = new AgentPushChannel(NullLogger<AgentPushChannel>.Instance);
+        _streams = new StreamSystem(
+            _registry,
+            _events,
+            _push,
+            TimeProvider.System,
+            NullLoggerFactory.Instance);
         _link = new ServerLinkSystem(
             _db,
             keys,
             _outbox,
             requests,
+            _streams,
+            _push,
             new ServerLinkOptions
             {
                 BaseUrl = _host.BaseUrl,
@@ -99,8 +128,20 @@ public sealed class ServerLinkSystemTests : IAsyncLifetime
 
     public async ValueTask DisposeAsync()
     {
+        if (_loops is not null)
+        {
+            await _streams.StopAsync(TestContext.Current.CancellationToken);
+            await _loops.DisposeAsync();
+        }
+
+        if (_services is not null)
+        {
+            await _services.DisposeAsync();
+        }
+
         await _link.StopAsync(TestContext.Current.CancellationToken);
         await _actors.DisposeAsync();
+        await _instance.DisposeAsync();
         await _host.DisposeAsync();
         SqliteConnection.ClearAllPools();
         foreach (var directory in new[] { _directory, _clientDirectory })
@@ -118,6 +159,81 @@ public sealed class ServerLinkSystemTests : IAsyncLifetime
         var ct = TestContext.Current.CancellationToken;
         await _link.StopAsync(ct);
         await _link.StopAsync(ct);
+    }
+
+    [Fact]
+    public async Task Watched_session_streams_provider_text_to_the_server_ring()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        const string sessionId = "ses_stream";
+        var logs = NullLoggerFactory.Instance;
+        _loops = new AcLoopSupervisor(TimeProvider.System, logs);
+        _services = new ServiceCollection().BuildServiceProvider();
+        var ctx = new AcSystemContext(
+            _services,
+            new ChannelAcEventBus(logs),
+            TimeProvider.System,
+            logs,
+            _loops);
+        await _streams.InitAsync(ctx, ct);
+        await _streams.StartAsync(ct);
+
+        await _link.StartAsync(ct);
+        await WaitUntilAsync(() => Task.FromResult(_link.ConnectedCount >= 1), TimeSpan.FromSeconds(10), ct);
+
+        var machineId = await _db.GetMachineIdAsync(ct);
+        var agentConnection = _host.Services.GetRequiredService<ConnectionRegistry>().GetConnection(machineId!.Value.Value);
+        agentConnection.ShouldNotBeNullOrEmpty();
+        var watches = _host.Services.GetRequiredService<SessionWatchCoordinator>();
+        await watches.WatchUiAsync(machineId!.Value.Value, sessionId, agentConnection!, ct);
+
+        var streams = _host.Services.GetRequiredService<SessionStreamHub>();
+        StreamReadResult? read = null;
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            _events.Publish(
+                _instance,
+                new ProviderEvent(
+                    "message.updated",
+                    JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+                    {
+                        ["sessionID"] = sessionId,
+                        ["info"] = new Dictionary<string, object?>
+                        {
+                            ["id"] = "msg_stream",
+                            ["role"] = "assistant",
+                        },
+                    })));
+            _events.Publish(
+                _instance,
+                new ProviderEvent(
+                    "message.part.updated",
+                    JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+                    {
+                        ["sessionID"] = sessionId,
+                        ["part"] = new Dictionary<string, object?>
+                        {
+                            ["id"] = "prt_stream",
+                            ["messageID"] = "msg_stream",
+                            ["type"] = "text",
+                            ["text"] = "hello",
+                        },
+                    })));
+
+            read = await streams.ReadAsync(machineId.Value.Value, sessionId, null, TimeSpan.Zero, ct);
+            if (read.Chunks.Count > 0)
+            {
+                break;
+            }
+
+            await Task.Delay(100, ct);
+        }
+
+        read.ShouldNotBeNull();
+        var chunk = read.Chunks[0];
+        chunk.Op.ShouldBe(StreamOp.Replace);
+        chunk.Text.ShouldBe("hello");
+        chunk.Seq.ShouldBe(1);
     }
 
     [Fact]

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using AiCtrl.Client.Security;
 using AiCtrl.Client.Storage;
+using AiCtrl.Client.Systems;
 using AiCtrl.Core.Domain;
 using AiCtrl.Core.Events;
 using AiCtrl.Core.Protocol;
@@ -20,6 +21,10 @@ public sealed class ServerLinkSystem : IAcSystem
     private readonly OutboxStore _outbox;
 
     private readonly ClientRequestHandler _requests;
+
+    private readonly StreamSystem _streams;
+
+    private readonly AgentPushChannel _push;
 
     private readonly ServerLinkOptions _options;
 
@@ -52,6 +57,8 @@ public sealed class ServerLinkSystem : IAcSystem
         DeviceKeyStore deviceKeys,
         OutboxStore outbox,
         ClientRequestHandler requests,
+        StreamSystem streams,
+        AgentPushChannel push,
         ServerLinkOptions options,
         INetworkChangeSignal network,
         TimeProvider time,
@@ -61,6 +68,8 @@ public sealed class ServerLinkSystem : IAcSystem
         ArgumentNullException.ThrowIfNull(deviceKeys);
         ArgumentNullException.ThrowIfNull(outbox);
         ArgumentNullException.ThrowIfNull(requests);
+        ArgumentNullException.ThrowIfNull(streams);
+        ArgumentNullException.ThrowIfNull(push);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(network);
         ArgumentNullException.ThrowIfNull(time);
@@ -69,6 +78,8 @@ public sealed class ServerLinkSystem : IAcSystem
         _deviceKeys = deviceKeys;
         _outbox = outbox;
         _requests = requests;
+        _streams = streams;
+        _push = push;
         _options = options;
         _network = network;
         _time = time;
@@ -204,34 +215,55 @@ public sealed class ServerLinkSystem : IAcSystem
             _ = HandleRequestAsync(connection, packet, ct);
             return Task.CompletedTask;
         });
+        connection.On<SessionRef[], int>("SetWatchedSessions", (sessions, leaseSeconds) =>
+        {
+            _streams.SetWatchedSessions(sessions, leaseSeconds);
+            return Task.CompletedTask;
+        });
 
-        await connection.StartAsync(ct).ConfigureAwait(false);
-        var lastAcked = await _outbox.GetLastAckedAsync(ct).ConfigureAwait(false);
-        var openCommands = await _requests.GetOpenIdsAsync(ct).ConfigureAwait(false);
-        var hello = new HelloRequest(
-            machineId,
-            typeof(ServerLinkSystem).Assembly.GetName().Version?.ToString() ?? "0.0.0",
-            bootId,
-            lastAcked,
-            openCommands.ToArray());
-        var ack = await connection.InvokeAsync<HelloAck>("Hello", hello, ct).ConfigureAwait(false);
-        _logger.LogInformation(
-            "Server link connected to {Url}; snapshotRequired={SnapshotRequired}; observedCountry={Country}.",
-            api.BaseUrl,
-            ack.SnapshotRequired,
-            ack.ObservedCountry ?? "unknown");
-        Interlocked.Increment(ref _connected);
+        Func<StreamBatch, CancellationToken, Task>? push = null;
+        try
+        {
+            await connection.StartAsync(ct).ConfigureAwait(false);
+            push = (batch, token) => connection.SendAsync("PushStream", batch, token);
+            _push.Attach(push);
 
-        await FlushOutboxAsync(connection, machineId, ct).ConfigureAwait(false);
-        await _requests
-            .ReportUnreportedAsync(response => connection.InvokeAsync("Respond", response, ct), ct)
-            .ConfigureAwait(false);
+            var lastAcked = await _outbox.GetLastAckedAsync(ct).ConfigureAwait(false);
+            var openCommands = await _requests.GetOpenIdsAsync(ct).ConfigureAwait(false);
+            var hello = new HelloRequest(
+                machineId,
+                typeof(ServerLinkSystem).Assembly.GetName().Version?.ToString() ?? "0.0.0",
+                bootId,
+                lastAcked,
+                openCommands.ToArray());
+            var ack = await connection.InvokeAsync<HelloAck>("Hello", hello, ct).ConfigureAwait(false);
+            _logger.LogInformation(
+                "Server link connected to {Url}; snapshotRequired={SnapshotRequired}; observedCountry={Country}.",
+                api.BaseUrl,
+                ack.SnapshotRequired,
+                ack.ObservedCountry ?? "unknown");
+            Interlocked.Increment(ref _connected);
 
-        using var wait = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var network = _network.WaitAsync(wait.Token);
-        await Task.WhenAny(closed.Task, network).ConfigureAwait(false);
-        await wait.CancelAsync().ConfigureAwait(false);
-        await connection.StopAsync(CancellationToken.None).ConfigureAwait(false);
+            await FlushOutboxAsync(connection, machineId, ct).ConfigureAwait(false);
+            await _requests
+                .ReportUnreportedAsync(response => connection.InvokeAsync("Respond", response, ct), ct)
+                .ConfigureAwait(false);
+
+            using var wait = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var network = _network.WaitAsync(wait.Token);
+            await Task.WhenAny(closed.Task, network).ConfigureAwait(false);
+            await wait.CancelAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            if (push is not null)
+            {
+                _push.Detach(push);
+            }
+
+            _streams.ClearWatches();
+            await connection.StopAsync(CancellationToken.None).ConfigureAwait(false);
+        }
     }
 
     private async Task EnsureTokenAsync(ServerApiClient api, DeviceKey key, MachineId machineId, CancellationToken ct)

@@ -54,6 +54,9 @@ public static class ServerSetup
         services.AddSingleton<RemoteQueryService>();
         services.AddSingleton<CommandExecutionService>();
         services.AddSingleton(streamOptions ?? new StreamOptions());
+        services.AddSingleton<SessionWatchRegistry>();
+        services.AddSingleton<SessionWatchCoordinator>();
+        services.AddHostedService(static sp => sp.GetRequiredService<SessionWatchCoordinator>());
         services.AddSingleton<SessionStreamHub>();
         services.AddHostedService<StreamIdleSweeper>();
         services.AddAcAuthentication(authOptions, secrets);

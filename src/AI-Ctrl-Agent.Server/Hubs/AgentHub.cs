@@ -28,6 +28,8 @@ public sealed class AgentHub : Hub<IAgentClient>, IAgentHub
 
     private readonly SessionStreamHub _streams;
 
+    private readonly SessionWatchCoordinator _watches;
+
     public AgentHub(
         ConnectionRegistry connections,
         ServerDb db,
@@ -35,7 +37,8 @@ public sealed class AgentHub : Hub<IAgentClient>, IAgentHub
         TimeProvider time,
         ILogger<AgentHub> logger,
         IHubContext<AgentHub> hub,
-        SessionStreamHub streams)
+        SessionStreamHub streams,
+        SessionWatchCoordinator watches)
     {
         ArgumentNullException.ThrowIfNull(connections);
         ArgumentNullException.ThrowIfNull(db);
@@ -44,6 +47,7 @@ public sealed class AgentHub : Hub<IAgentClient>, IAgentHub
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(hub);
         ArgumentNullException.ThrowIfNull(streams);
+        ArgumentNullException.ThrowIfNull(watches);
         _connections = connections;
         _db = db;
         _pending = pending;
@@ -51,6 +55,7 @@ public sealed class AgentHub : Hub<IAgentClient>, IAgentHub
         _logger = logger;
         _hub = hub;
         _streams = streams;
+        _watches = watches;
     }
 
     public async Task<HelloAck> Hello(HelloRequest req)
@@ -89,6 +94,8 @@ public sealed class AgentHub : Hub<IAgentClient>, IAgentHub
         }
 
         _logger.LogInformation("Agent {MachineId} connected ({ConnectionId}).", machineId, Context.ConnectionId);
+        await _watches.SendToConnectionAsync(machineId, Context.ConnectionId, Context.ConnectionAborted)
+            .ConfigureAwait(false);
         return new HelloAck(
             _time.GetUtcNow().ToUnixTimeMilliseconds(),
             ip ?? string.Empty,

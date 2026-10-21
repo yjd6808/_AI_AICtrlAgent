@@ -400,12 +400,14 @@ public static class ServerEndpoints
         string machineId,
         string sessionId,
         SessionStreamHub streams,
+        SessionWatchCoordinator watches,
         StreamOptions streamOptions,
         TimeProvider time,
         CancellationToken ct)
     {
         var traceId = TraceId(context);
         var cursor = context.Request.Query["cursor"].FirstOrDefault();
+        await watches.TouchRestAsync(machineId, sessionId, ct).ConfigureAwait(false);
         var waitMs = int.TryParse(
             context.Request.Query["waitMs"].FirstOrDefault(),
             CultureInfo.InvariantCulture,

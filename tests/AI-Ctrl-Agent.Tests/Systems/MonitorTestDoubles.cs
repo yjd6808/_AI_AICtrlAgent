@@ -232,7 +232,10 @@ internal sealed class MonitorHarness : IAsyncDisposable
 
     public FakeTimeProvider Time { get; }
 
-    public static async Task<MonitorHarness> StartAsync(CancellationToken ct, MonitorOptions? options = null)
+    public static async Task<MonitorHarness> StartAsync(
+        CancellationToken ct,
+        MonitorOptions? options = null,
+        ProviderEventBroker? events = null)
     {
         var time = new FakeTimeProvider();
         var logs = new CapturingLoggerFactory();
@@ -240,7 +243,7 @@ internal sealed class MonitorHarness : IAsyncDisposable
         var loops = new AcLoopSupervisor(time, logs);
         var instance = new FakeProviderInstance();
         var registry = new FakeProviderInstanceRegistry(new MachineId("m_test"), new[] { instance });
-        var monitor = new MonitorSystem(registry, options ?? new MonitorOptions(), time, logs);
+        var monitor = new MonitorSystem(registry, options ?? new MonitorOptions(), time, logs, events: events);
         var ctx = new AcSystemContext(new ServiceCollection().BuildServiceProvider(), bus, time, logs, loops);
 
         await monitor.InitAsync(ctx, ct);

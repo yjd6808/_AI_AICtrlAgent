@@ -3,6 +3,7 @@ using AiCtrl.Core.Domain;
 using AiCtrl.Core.Events;
 using AiCtrl.Core.Providers;
 using AiCtrl.Tests.Runtime;
+using Microsoft.Extensions.Logging.Abstractions;
 using Shouldly;
 
 namespace AiCtrl.Tests.Systems;
@@ -10,6 +11,24 @@ namespace AiCtrl.Tests.Systems;
 public sealed class MonitorSystemTests
 {
     private const string Session = "ses_1";
+
+    [Fact]
+    public async Task Provider_events_are_published_to_the_broker()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var events = new ProviderEventBroker(NullLogger<ProviderEventBroker>.Instance);
+        var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var subscription = events.Subscribe((_, providerEvent) => received.TrySetResult(providerEvent.Kind));
+        await using var harness = await MonitorHarness.StartAsync(ct, events: events);
+
+        harness.Instance.Emit("session.idle", new Dictionary<string, object?>
+        {
+            ["sessionID"] = Session,
+        });
+
+        var kind = await received.Task.WaitAsync(TimeSpan.FromSeconds(5), ct);
+        kind.ShouldBe("session.idle");
+    }
 
     [Fact]
     public async Task Busy_to_idle_with_completed_assistant_raises_turn_completed_and_logs_ai_output()
