@@ -1,0 +1,29 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 50vh;
+  padding: 32px;
+  color: var(--text-subtle);
+  text-align: center;
+}
+
+.title {
+  color: var(--text);
+  font-size: 19px;
+}
+
+.description {
+  font-size: 13px;
+}
+
+.link {
+  margin-top: 6px;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

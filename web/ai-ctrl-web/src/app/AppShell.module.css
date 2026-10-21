@@ -1,0 +1,375 @@
+.shell {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  width: min(var(--sidebar-width), 84vw);
+  height: 100vh;
+  height: 100dvh;
+  border-right: 1px solid var(--border);
+  background: #0d131b;
+  transform: translateX(-102%);
+  transition: transform 180ms ease;
+  visibility: hidden;
+}
+
+.sidebarOpen {
+  transform: translateX(0);
+  visibility: visible;
+}
+
+.brandRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 16px 16px 12px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.brandMark {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgb(63 182 168 / 35%);
+  border-radius: 9px;
+  background: rgb(63 182 168 / 12%);
+  color: var(--accent);
+}
+
+.brandName {
+  display: block;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+}
+
+.brandSub {
+  display: block;
+  color: var(--text-subtle);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.closeButton {
+  display: inline-flex;
+  padding: 5px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-subtle);
+}
+
+.machinePicker {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 4px 14px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.pickerLabel {
+  color: var(--text-subtle);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.selectWrap {
+  position: relative;
+}
+
+.select {
+  width: 100%;
+  min-height: 36px;
+  padding: 7px 30px 7px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 13px;
+  appearance: none;
+  text-overflow: ellipsis;
+}
+
+.selectIcon {
+  position: absolute;
+  top: 50%;
+  right: 9px;
+  color: var(--text-subtle);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.pickerError {
+  color: var(--danger);
+  font-size: 11px;
+}
+
+.nav {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 8px 16px;
+}
+
+.navGroup {
+  padding: 8px 0;
+}
+
+.navGroup + .navGroup {
+  border-top: 1px solid rgb(35 48 68 / 65%);
+}
+
+.navCaption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 8px 6px;
+  color: var(--text-subtle);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 10px;
+  text-align: center;
+}
+
+.navLink {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 34px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.navLink:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.navLinkActive {
+  background: rgb(63 182 168 / 11%);
+  color: var(--accent);
+}
+
+.navLinkMuted {
+  color: var(--text-subtle);
+}
+
+.itemText {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.itemBadge {
+  flex: none;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-subtle);
+  font-size: 9px;
+  line-height: 16px;
+}
+
+.activeMarker {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: none;
+}
+
+.navEmpty {
+  padding: 5px 8px;
+  color: var(--text-subtle);
+  font-size: 12px;
+}
+
+.sidebarFooter {
+  padding: 12px 14px calc(14px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--border);
+}
+
+.userEmail {
+  color: var(--text-muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.footerHint {
+  margin-top: 2px;
+  color: var(--text-subtle);
+  font-size: 10px;
+}
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  border: 0;
+  background: rgb(2 5 9 / 65%);
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--header-height);
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+  background: rgb(11 15 20 / 88%);
+  backdrop-filter: blur(10px);
+}
+
+.menuButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-muted);
+}
+
+.topbarTitle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1;
+  min-width: 0;
+}
+
+.onlineDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.online {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px rgb(74 222 128 / 12%);
+}
+
+.offline {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px rgb(248 113 113 / 12%);
+}
+
+.hostname {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topbarMeta {
+  color: var(--text-subtle);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topbarStatus {
+  color: var(--text-subtle);
+  font-size: 11px;
+}
+
+.content {
+  width: 100%;
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: 20px 16px calc(32px + env(safe-area-inset-bottom));
+}
+
+.instanceHint {
+  margin-bottom: 12px;
+  color: var(--text-subtle);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (min-width: 960px) {
+  .sidebar {
+    width: var(--sidebar-width);
+    transform: none;
+    visibility: visible;
+  }
+
+  .brandRow {
+    padding-top: 20px;
+  }
+
+  .closeButton {
+    display: none;
+  }
+
+  .menuButton {
+    display: none;
+  }
+
+  .backdrop {
+    display: none;
+  }
+
+  .main {
+    margin-left: var(--sidebar-width);
+  }
+
+  .topbar {
+    padding: 0 28px;
+  }
+
+  .content {
+    padding: 28px 28px 56px;
+  }
+}

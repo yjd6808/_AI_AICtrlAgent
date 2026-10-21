@@ -1,0 +1,77 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.backLink {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.hero {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: linear-gradient(150deg, rgb(24 34 49 / 80%), rgb(18 24 33 / 90%));
+}
+
+.icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border: 1px solid rgb(251 191 36 / 25%);
+  border-radius: 10px;
+  background: rgb(251 191 36 / 8%);
+  color: var(--warn);
+}
+
+.heroTitle {
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.heroText {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.panel {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgb(18 24 33 / 58%);
+}
+
+.panelHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  color: var(--text-muted);
+}
+
+.panelTitle {
+  font-size: 13px;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding-left: 20px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.list li::marker {
+  color: var(--accent);
+}

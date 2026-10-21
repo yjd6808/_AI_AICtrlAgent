@@ -1,0 +1,52 @@
+.page {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: 24px;
+}
+
+.brand,
+.errorCard {
+  width: min(420px, 100%);
+}
+
+.brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+  text-align: center;
+}
+
+.mark {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border: 1px solid rgb(63 182 168 / 35%);
+  border-radius: 12px;
+  background: rgb(63 182 168 / 12%);
+  color: var(--accent);
+}
+
+.title {
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.message {
+  color: var(--text-subtle);
+  font-size: 12px;
+}
+
+.spin {
+  color: var(--accent);
+  animation: rotate 900ms linear infinite;
+}
+
+@keyframes rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}

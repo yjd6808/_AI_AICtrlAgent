@@ -1,0 +1,150 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.backLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.backLink:hover {
+  color: var(--accent);
+}
+
+.chat {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgb(18 24 33 / 58%);
+}
+
+.chatHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 2px 4px;
+}
+
+.chatTitleGroup,
+.chatMeta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.chatTitle {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.count {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.stateText {
+  color: var(--text-subtle);
+  font-size: 10px;
+}
+
+.chatMeta {
+  color: var(--text-subtle);
+  font-size: 10px;
+}
+
+.jumpButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--text-subtle);
+}
+
+.jumpButton:hover {
+  color: var(--text);
+}
+
+.scroll {
+  position: relative;
+  height: clamp(260px, 48vh, 620px);
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: #0a0e13;
+  overscroll-behavior: contain;
+}
+
+.virtualInner {
+  position: relative;
+  width: 100%;
+}
+
+.virtualRow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  padding: 5px 10px;
+}
+
+.chatError,
+.emptyChat {
+  padding: 16px 0;
+}
+
+.pagination {
+  display: flex;
+  justify-content: center;
+}
+
+.pendingList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.polling {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  color: var(--text-subtle);
+  font-size: 10px;
+}
+
+.spin {
+  animation: rotate 900ms linear infinite;
+}
+
+@media (min-width: 960px) {
+  .scroll {
+    height: clamp(320px, 54vh, 700px);
+  }
+}
+
+@keyframes rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}

@@ -1,0 +1,75 @@
+.viewport {
+  position: fixed;
+  right: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(380px, calc(100vw - 32px));
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 11px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: rgb(24 34 49 / 96%);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  pointer-events: auto;
+  animation: enter 160ms ease-out;
+}
+
+.info {
+  border-color: rgb(96 165 250 / 34%);
+}
+
+.info > svg {
+  color: var(--info);
+}
+
+.success {
+  border-color: rgb(74 222 128 / 34%);
+}
+
+.success > svg {
+  color: var(--ok);
+}
+
+.error {
+  border-color: rgb(248 113 113 / 38%);
+}
+
+.error > svg {
+  color: var(--danger);
+}
+
+.message {
+  flex: 1;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.close {
+  display: inline-flex;
+  padding: 2px;
+  border: 0;
+  background: transparent;
+  color: var(--text-subtle);
+}
+
+.close:hover {
+  color: var(--text);
+}
+
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}

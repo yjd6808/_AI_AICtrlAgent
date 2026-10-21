@@ -1,0 +1,156 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgb(18 24 33 / 58%);
+}
+
+.panelHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-muted);
+}
+
+.panelTitle {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.infoGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 9px;
+}
+
+.label {
+  color: var(--text-subtle);
+  font-size: 10px;
+  font-weight: 650;
+  text-transform: uppercase;
+}
+
+.value {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.hint {
+  color: var(--text-subtle);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.codeRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.code {
+  padding: 5px 8px;
+  border: 1px solid rgb(63 182 168 / 28%);
+  border-radius: var(--radius-sm);
+  background: rgb(63 182 168 / 8%);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+
+.expiry {
+  color: var(--warn);
+  font-size: 10px;
+}
+
+.machineList {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.machineItem {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 0;
+  border-top: 1px solid rgb(35 48 68 / 62%);
+}
+
+.machineItem:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.machineInfo {
+  min-width: 0;
+}
+
+.machineTitleRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.machineName {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.machineMeta {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.machineId {
+  margin-top: 2px;
+  color: var(--text-subtle);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  overflow-wrap: anywhere;
+}
+
+@media (min-width: 680px) {
+  .infoGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .machineItem {
+    flex-direction: column;
+  }
+}
