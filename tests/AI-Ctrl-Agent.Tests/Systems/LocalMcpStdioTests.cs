@@ -2,9 +2,11 @@ using System.Diagnostics;
 using System.Text.Json;
 using AiCtrl.Client.Commands;
 using AiCtrl.Client.Storage;
+using AiCtrl.Client.Workspace;
 using AiCtrl.Client.Systems;
 using AiCtrl.Core.Domain;
 using AiCtrl.Core.Runtime;
+using AiCtrl.Tests.Client;
 using AiCtrl.Tests.Commands;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
@@ -39,6 +41,8 @@ public sealed class LocalMcpStdioTests : IAsyncLifetime
         _instance.AddAssistantMessage("ses_1", completed: true);
 
         var registry = new FakeProviderInstanceRegistry(new MachineId("m_stdio"), new[] { _instance });
+        var workspaces = new WorkspaceRegistry(new WorkspaceOptions([], []));
+        var files = new FilesSystem(workspaces);
         var commands = new CommandSystem(
             new JournalStore(db),
             _actors,
@@ -51,6 +55,8 @@ public sealed class LocalMcpStdioTests : IAsyncLifetime
                     TimeSpan.FromMilliseconds(60)),
                 TimeProvider.System,
                 NullLogger<AbortAndPromptRunner>.Instance),
+            files,
+            TestTransferSystem.Create(db, workspaces),
             TimeProvider.System,
             NullLogger<CommandSystem>.Instance);
 
@@ -68,6 +74,7 @@ public sealed class LocalMcpStdioTests : IAsyncLifetime
             commands,
             registry,
             _state,
+            files,
             new LocalApiOptions { Port = 0, TokenPath = Path.Combine(_directory, "local-token") },
             TimeProvider.System,
             NullLoggerFactory.Instance);

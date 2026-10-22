@@ -8,6 +8,7 @@ using AiCtrl.Server.Persistence;
 using AiCtrl.Server.Requests;
 using AiCtrl.Server.Security;
 using AiCtrl.Server.Streams;
+using AiCtrl.Server.Transfers;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -27,7 +28,8 @@ public static class ServerSetup
         AuthOptions authOptions,
         IServerSecretStore secrets,
         RequestOptions? requestOptions = null,
-        StreamOptions? streamOptions = null)
+        StreamOptions? streamOptions = null,
+        TransferOptions? transferOptions = null)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(dbOptions);
@@ -53,6 +55,13 @@ public static class ServerSetup
         services.AddSingleton<RequestDispatchService>();
         services.AddSingleton<RemoteQueryService>();
         services.AddSingleton<CommandExecutionService>();
+        services.AddSingleton(transferOptions ?? new TransferOptions
+        {
+            Dir = Path.Combine(
+                Path.GetDirectoryName(dbOptions.Path) ?? AppContext.BaseDirectory,
+                "transfers"),
+        });
+        services.AddSingleton<TransferStore>();
         services.AddSingleton(streamOptions ?? new StreamOptions());
         services.AddSingleton<SessionWatchRegistry>();
         services.AddSingleton<SessionWatchCoordinator>();
@@ -89,7 +98,8 @@ public static class ServerSetup
             authOptions,
             secrets,
             RequestOptions.FromConfiguration(configuration),
-            StreamOptions.FromConfiguration(configuration));
+            StreamOptions.FromConfiguration(configuration),
+            TransferOptions.FromConfiguration(configuration));
     }
 
     public static WebApplication BuildAcServer(string[] args)

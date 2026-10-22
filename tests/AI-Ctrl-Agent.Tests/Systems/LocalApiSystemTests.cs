@@ -4,10 +4,14 @@ using System.Text;
 using System.Text.Json;
 using AiCtrl.Client.Commands;
 using AiCtrl.Client.Storage;
+using AiCtrl.Client.Workspace;
 using AiCtrl.Client.Systems;
 using AiCtrl.Core.Commands;
 using AiCtrl.Core.Domain;
+using AiCtrl.Core.Protocol;
 using AiCtrl.Core.Runtime;
+using AiCtrl.Core.Serialization;
+using AiCtrl.Tests.Client;
 using AiCtrl.Tests.Commands;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
@@ -21,6 +25,8 @@ public sealed class LocalApiSystemTests : IAsyncLifetime
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "aictrl-tests", Guid.NewGuid().ToString("N"));
 
     private readonly string _tokenPath;
+
+    private readonly string _workspaceRoot;
 
     private ScriptedProviderInstance _instance = null!;
 
@@ -37,6 +43,7 @@ public sealed class LocalApiSystemTests : IAsyncLifetime
     public LocalApiSystemTests()
     {
         _tokenPath = Path.Combine(_directory, "local-token");
+        _workspaceRoot = Path.Combine(_directory, "workspace");
     }
 
     public async ValueTask InitializeAsync()
@@ -62,11 +69,25 @@ public sealed class LocalApiSystemTests : IAsyncLifetime
             TimeProvider.System,
             NullLogger<AbortAndPromptRunner>.Instance);
 
+        Directory.CreateDirectory(_workspaceRoot);
+        await File.WriteAllTextAsync(Path.Combine(_workspaceRoot, "note.txt"), "hello local api", ct);
+        var workspace = new WorkspaceDefinition(
+            "test",
+            _workspaceRoot,
+            AllowUpload: true,
+            AllowDownload: true,
+            AllowMkdir: true,
+            AllowDelete: true,
+            DenyPatterns: []);
+        var workspaces = new WorkspaceRegistry(new WorkspaceOptions([workspace], []));
+        var files = new FilesSystem(workspaces);
         var commands = new CommandSystem(
             new JournalStore(db),
             _actors,
             registry,
             runner,
+            files,
+            TestTransferSystem.Create(db, workspaces),
             TimeProvider.System,
             NullLogger<CommandSystem>.Instance);
 
@@ -84,6 +105,7 @@ public sealed class LocalApiSystemTests : IAsyncLifetime
             commands,
             registry,
             _state,
+            files,
             new LocalApiOptions { Port = 0, TokenPath = _tokenPath },
             TimeProvider.System,
             NullLoggerFactory.Instance);
@@ -210,6 +232,100 @@ public sealed class LocalApiSystemTests : IAsyncLifetime
         response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
         using var document = await ReadJsonAsync(response);
         document.RootElement.GetProperty("code").GetString().ShouldBe("invalid_payload");
+    }
+
+    [Fact]
+    public async Task Files_endpoints_list_stat_preview_and_mutate()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var workspaceId = await GetWorkspaceIdAsync(ct);
+
+        var list = await _client.GetAsync(
+            $"/local/v1/files?workspaceId={workspaceId}&sort=name&limit=50",
+            ct);
+        list.StatusCode.ShouldBe(HttpStatusCode.OK);
+        using var listDocument = await ReadJsonAsync(list);
+        var entries = listDocument.RootElement.GetProperty("data").GetProperty("entries");
+        entries.EnumerateArray().ShouldContain(item => item.GetProperty("name").GetString() == "note.txt");
+
+        var stat = await _client.GetAsync(
+            $"/local/v1/files/stat?workspaceId={workspaceId}&path=note.txt&hash=true",
+            ct);
+        stat.StatusCode.ShouldBe(HttpStatusCode.OK);
+        using var statDocument = await ReadJsonAsync(stat);
+        var statData = statDocument.RootElement.GetProperty("data");
+        statData.GetProperty("size").GetInt64().ShouldBe(15);
+        statData.GetProperty("sha256").GetString()!.Length.ShouldBe(64);
+
+        var preview = await _client.GetAsync(
+            $"/local/v1/files/preview?workspaceId={workspaceId}&path=note.txt",
+            ct);
+        preview.StatusCode.ShouldBe(HttpStatusCode.OK);
+        using var previewDocument = await ReadJsonAsync(preview);
+        var previewData = previewDocument.RootElement.GetProperty("data");
+        previewData.GetProperty("kind").GetString().ShouldBe("text");
+        previewData.GetProperty("text").GetString().ShouldBe("hello local api");
+
+        using var mkdirContent = new StringContent(
+            JsonSerializer.Serialize(
+                new FilesMkdirPayload(workspaceId, "docs"),
+                AcJsonContext.Default.FilesMkdirPayload),
+            Encoding.UTF8,
+            "application/json");
+        var mkdir = await _client.PostAsync("/local/v1/files/mkdir", mkdirContent, ct);
+        mkdir.StatusCode.ShouldBe(HttpStatusCode.OK);
+        Directory.Exists(Path.Combine(_workspaceRoot, "docs")).ShouldBeTrue();
+
+        using var renameContent = new StringContent(
+            JsonSerializer.Serialize(
+                new FilesRenamePayload(workspaceId, "docs", "docs2"),
+                AcJsonContext.Default.FilesRenamePayload),
+            Encoding.UTF8,
+            "application/json");
+        var rename = await _client.PostAsync("/local/v1/files/rename", renameContent, ct);
+        rename.StatusCode.ShouldBe(HttpStatusCode.OK);
+        Directory.Exists(Path.Combine(_workspaceRoot, "docs2")).ShouldBeTrue();
+
+        using var deleteContent = new StringContent(
+            JsonSerializer.Serialize(
+                new FilesDeletePayload(workspaceId, "docs2"),
+                AcJsonContext.Default.FilesDeletePayload),
+            Encoding.UTF8,
+            "application/json");
+        var delete = await _client.PostAsync("/local/v1/files/delete", deleteContent, ct);
+        delete.StatusCode.ShouldBe(HttpStatusCode.OK);
+        Directory.Exists(Path.Combine(_workspaceRoot, "docs2")).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Files_endpoints_reject_traversal_and_unknown_workspace()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var workspaceId = await GetWorkspaceIdAsync(ct);
+
+        var traversal = await _client.GetAsync(
+            $"/local/v1/files?workspaceId={workspaceId}&path=..%2F..%2Fsecret",
+            ct);
+        traversal.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        using var traversalDocument = await ReadJsonAsync(traversal);
+        traversalDocument.RootElement.GetProperty("code").GetString().ShouldBe("path_invalid");
+
+        var unknown = await _client.GetAsync("/local/v1/files?workspaceId=ws_missing", ct);
+        unknown.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        using var unknownDocument = await ReadJsonAsync(unknown);
+        unknownDocument.RootElement.GetProperty("code").GetString().ShouldBe("workspace_not_allowed");
+    }
+
+    private async Task<string> GetWorkspaceIdAsync(CancellationToken ct)
+    {
+        var response = await _client.GetAsync("/local/v1/workspaces", ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        using var document = await ReadJsonAsync(response);
+        return document.RootElement
+            .GetProperty("data")[0]
+            .GetProperty("workspaceId")
+            .GetString()
+            .ShouldNotBeNull();
     }
 
     private static async Task<JsonDocument> ReadJsonAsync(HttpResponseMessage response)

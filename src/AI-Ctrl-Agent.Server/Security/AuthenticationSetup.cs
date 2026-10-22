@@ -99,6 +99,9 @@ public static class AuthenticationSetup
             o.AddPolicy(GoogleAuthPolicy.BrowserPolicy, policy => policy
                 .AddAuthenticationSchemes(GoogleAuthPolicy.CookieScheme)
                 .RequireAuthenticatedUser());
+            o.AddPolicy(AgentTokenDefaults.Policy, policy => policy
+                .AddAuthenticationSchemes(AgentTokenDefaults.Scheme)
+                .RequireAuthenticatedUser());
         });
 
         return services;

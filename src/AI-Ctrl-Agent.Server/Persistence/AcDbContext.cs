@@ -25,6 +25,8 @@ public sealed class AcDbContext : DbContext
 
     public DbSet<QueryCacheEntity> QueryCache => Set<QueryCacheEntity>();
 
+    public DbSet<TransferEntity> Transfers => Set<TransferEntity>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<UserEntity>(entity =>
@@ -137,6 +139,33 @@ public sealed class AcDbContext : DbContext
             entity.Property(x => x.PayloadJson).HasColumnName("payload_json").IsRequired();
             entity.Property(x => x.AsOf).HasColumnName("as_of");
         });
+
+        modelBuilder.Entity<TransferEntity>(entity =>
+        {
+            entity.ToTable("transfers");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Id).HasColumnName("id");
+            entity.Property(x => x.MachineId).HasColumnName("machine_id").IsRequired();
+            entity.Property(x => x.Direction).HasColumnName("direction").IsRequired();
+            entity.Property(x => x.WorkspaceId).HasColumnName("workspace_id").IsRequired();
+            entity.Property(x => x.RelPath).HasColumnName("rel_path").IsRequired();
+            entity.Property(x => x.RelDir).HasColumnName("rel_dir");
+            entity.Property(x => x.FileName).HasColumnName("file_name").IsRequired();
+            entity.Property(x => x.Conflict).HasColumnName("conflict");
+            entity.Property(x => x.AsZip).HasColumnName("as_zip");
+            entity.Property(x => x.Size).HasColumnName("size");
+            entity.Property(x => x.Sha256).HasColumnName("sha256");
+            entity.Property(x => x.ChunkSize).HasColumnName("chunk_size");
+            entity.Property(x => x.ChunksTotal).HasColumnName("chunks_total");
+            entity.Property(x => x.ReceivedJson).HasColumnName("received_json").IsRequired();
+            entity.Property(x => x.Status).HasColumnName("status").IsRequired();
+            entity.Property(x => x.Error).HasColumnName("error");
+            entity.Property(x => x.CreatedAt).HasColumnName("created_at");
+            entity.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            entity.Property(x => x.ExpiresAt).HasColumnName("expires_at");
+            entity.HasIndex(x => new { x.MachineId, x.CreatedAt });
+            entity.HasIndex(x => x.Status);
+        });
     }
 }
 
@@ -180,6 +209,47 @@ public sealed class MachineEntity
     public string? ObservedCountry { get; set; }
 
     public string? BootId { get; set; }
+}
+
+public sealed class TransferEntity
+{
+    public string Id { get; set; } = string.Empty;
+
+    public string MachineId { get; set; } = string.Empty;
+
+    public string Direction { get; set; } = string.Empty;
+
+    public string WorkspaceId { get; set; } = string.Empty;
+
+    public string RelPath { get; set; } = string.Empty;
+
+    public string? RelDir { get; set; }
+
+    public string FileName { get; set; } = string.Empty;
+
+    public string? Conflict { get; set; }
+
+    public bool AsZip { get; set; }
+
+    public long Size { get; set; }
+
+    public string? Sha256 { get; set; }
+
+    public int ChunkSize { get; set; }
+
+    public int ChunksTotal { get; set; }
+
+    public string ReceivedJson { get; set; } = "[]";
+
+    public string Status { get; set; } = string.Empty;
+
+    public string? Error { get; set; }
+
+    public DateTimeOffset CreatedAt { get; set; }
+
+    public DateTimeOffset UpdatedAt { get; set; }
+
+    public DateTimeOffset ExpiresAt { get; set; }
 }
 
 public sealed class EnrollmentCodeEntity

@@ -4,6 +4,8 @@ using AiCtrl.Client.Providers.OpenCode.Backend;
 using AiCtrl.Client.Security;
 using AiCtrl.Client.Storage;
 using AiCtrl.Client.Systems;
+using AiCtrl.Client.Transfers;
+using AiCtrl.Client.Workspace;
 using AiCtrl.Core.Config;
 using AiCtrl.Core.Logging;
 using AiCtrl.Core.Runtime;
@@ -52,6 +54,10 @@ var journal = new JournalStore(clientDb);
 await journal.RecoverInterruptedAsync(time.GetUtcNow(), ct).ConfigureAwait(false);
 
 var registry = new ProviderInstanceRegistry(machineId);
+var workspaceOptions = WorkspaceOptions.FromConfiguration(builder.Configuration);
+var workspaceRegistry = new WorkspaceRegistry(workspaceOptions);
+var filesSystem = new FilesSystem(workspaceRegistry);
+var transferLink = new TransferLinkState();
 var monitorOptions = MonitorOptions.FromConfiguration(builder.Configuration);
 var providerHostOptions = ProviderHostOptions.FromConfiguration(builder.Configuration);
 var localApiOptions = LocalApiOptions.FromConfiguration(builder.Configuration);
@@ -63,6 +69,16 @@ var network = new NetworkChangeSignal();
 
 builder.Services.AddSingleton(clientDb);
 builder.Services.AddSingleton(journal);
+builder.Services.AddSingleton(workspaceOptions);
+builder.Services.AddSingleton(workspaceRegistry);
+builder.Services.AddSingleton(filesSystem);
+builder.Services.AddSingleton(transferLink);
+builder.Services.AddSingleton(sp => new TransferSystem(
+    clientDb,
+    workspaceRegistry,
+    transferLink,
+    time,
+    sp.GetRequiredService<ILogger<TransferSystem>>()));
 builder.Services.AddSingleton<ISecretStore>(secrets);
 builder.Services.AddSingleton(deviceKeys);
 builder.Services.AddSingleton(outbox);
@@ -79,6 +95,8 @@ builder.Services.AddSingleton(sp => new CommandSystem(
     sp.GetRequiredService<SessionActorPool>(),
     registry,
     sp.GetRequiredService<AbortAndPromptRunner>(),
+    filesSystem,
+    sp.GetRequiredService<TransferSystem>(),
     time,
     sp.GetRequiredService<ILogger<CommandSystem>>()));
 
@@ -110,6 +128,7 @@ builder.Services.AddSingleton(sp => new LocalApiSystem(
     sp.GetRequiredService<CommandSystem>(),
     registry,
     sp.GetRequiredService<StateSystem>(),
+    filesSystem,
     localApiOptions,
     time,
     sp.GetRequiredService<ILoggerFactory>()));
@@ -118,6 +137,7 @@ builder.Services.AddSingleton(sp => new ClientRequestHandler(
     journal,
     registry,
     sp.GetRequiredService<StateSystem>(),
+    filesSystem,
     time,
     sp.GetRequiredService<ILogger<ClientRequestHandler>>()));
 builder.Services.AddSingleton(sp => new ServerLinkSystem(
@@ -127,6 +147,7 @@ builder.Services.AddSingleton(sp => new ServerLinkSystem(
     sp.GetRequiredService<ClientRequestHandler>(),
     sp.GetRequiredService<StreamSystem>(),
     sp.GetRequiredService<AgentPushChannel>(),
+    transferLink,
     serverLinkOptions,
     sp.GetRequiredService<INetworkChangeSignal>(),
     time,
@@ -138,6 +159,7 @@ builder.Services.AddSingleton<IAcSystem>(sp => sp.GetRequiredService<StreamSyste
 builder.Services.AddSingleton<IAcSystem>(sp => sp.GetRequiredService<StateSystem>());
 builder.Services.AddSingleton<IAcSystem>(sp => sp.GetRequiredService<LocalApiSystem>());
 builder.Services.AddSingleton<IAcSystem>(sp => sp.GetRequiredService<ServerLinkSystem>());
+builder.Services.AddSingleton<IAcSystem>(sp => sp.GetRequiredService<TransferSystem>());
 
 var host = builder.Build();
 await host.RunAsync();

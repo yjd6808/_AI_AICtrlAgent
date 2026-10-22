@@ -44,7 +44,8 @@ public sealed record FilesReceivePayload(
     string WorkspaceId,
     string RelDir,
     string FileName,
-    string Conflict);
+    string Conflict,
+    string? Sha256 = null);
 
 public sealed record FilesSendPayload(string TransferId, string WorkspaceId, string RelPath, bool AsZip);
 

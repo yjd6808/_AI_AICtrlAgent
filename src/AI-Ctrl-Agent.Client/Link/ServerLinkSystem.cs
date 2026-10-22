@@ -2,6 +2,7 @@ using System.Text.Json;
 using AiCtrl.Client.Security;
 using AiCtrl.Client.Storage;
 using AiCtrl.Client.Systems;
+using AiCtrl.Client.Transfers;
 using AiCtrl.Core.Domain;
 using AiCtrl.Core.Events;
 using AiCtrl.Core.Protocol;
@@ -25,6 +26,8 @@ public sealed class ServerLinkSystem : IAcSystem
     private readonly StreamSystem _streams;
 
     private readonly AgentPushChannel _push;
+
+    private readonly TransferLinkState _transfers;
 
     private readonly ServerLinkOptions _options;
 
@@ -59,6 +62,7 @@ public sealed class ServerLinkSystem : IAcSystem
         ClientRequestHandler requests,
         StreamSystem streams,
         AgentPushChannel push,
+        TransferLinkState transfers,
         ServerLinkOptions options,
         INetworkChangeSignal network,
         TimeProvider time,
@@ -70,6 +74,7 @@ public sealed class ServerLinkSystem : IAcSystem
         ArgumentNullException.ThrowIfNull(requests);
         ArgumentNullException.ThrowIfNull(streams);
         ArgumentNullException.ThrowIfNull(push);
+        ArgumentNullException.ThrowIfNull(transfers);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(network);
         ArgumentNullException.ThrowIfNull(time);
@@ -80,6 +85,7 @@ public sealed class ServerLinkSystem : IAcSystem
         _requests = requests;
         _streams = streams;
         _push = push;
+        _transfers = transfers;
         _options = options;
         _network = network;
         _time = time;
@@ -121,6 +127,7 @@ public sealed class ServerLinkSystem : IAcSystem
 
         var url = await _db.GetValueAsync("server.url", ct).ConfigureAwait(false);
         _api = new ServerApiClient(string.IsNullOrWhiteSpace(url) ? _options.BaseUrl : url);
+        _transfers.Set(_api, null);
         _loop = Task.Run(() => RunAsync(key, _cts.Token), CancellationToken.None);
     }
 
@@ -143,6 +150,7 @@ public sealed class ServerLinkSystem : IAcSystem
             }
         }
 
+        _transfers.Set(null, null);
         _api?.Dispose();
         _cts.Dispose();
     }
@@ -193,6 +201,7 @@ public sealed class ServerLinkSystem : IAcSystem
             ?? throw new InvalidOperationException("Machine id is missing.");
         var api = _api ?? throw new InvalidOperationException("Server API client is missing.");
         await EnsureTokenAsync(api, key, machineId, ct).ConfigureAwait(false);
+        _transfers.Set(api, _token);
 
         var builder = new HubConnectionBuilder()
             .WithUrl(api.BaseUrl + "/hubs/agent", options =>
@@ -278,6 +287,7 @@ public sealed class ServerLinkSystem : IAcSystem
         var token = await api.TokenAsync(new AgentTokenRequest(machineId, challenge.Nonce, signature), ct).ConfigureAwait(false);
         _token = token.AccessToken;
         _tokenExpiresAt = _time.GetUtcNow().AddSeconds(token.ExpiresIn);
+        _transfers.Set(_api, _token);
     }
 
     private async Task FlushOutboxAsync(HubConnection connection, MachineId machineId, CancellationToken ct)

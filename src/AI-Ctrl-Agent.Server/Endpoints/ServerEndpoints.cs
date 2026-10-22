@@ -114,6 +114,8 @@ public static class ServerEndpoints
 
         app.MapGet("/api/v1/logs/server/{name}", ReadServerLogAsync)
             .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
+
+        app.MapAcWorkspaceEndpoints();
     }
 
     public static IServiceCollection AddAcRateLimiting(this IServiceCollection services)

@@ -26,6 +26,12 @@ public static class QueryTypes
 
     public const string WorkspaceGit = "workspace.git";
 
+    public const string FilesList = "files.list";
+
+    public const string FilesStat = "files.stat";
+
+    public const string FilesPreview = "files.preview";
+
     public const string LogsList = "logs.list";
 
     public const string LogsTail = "logs.tail";

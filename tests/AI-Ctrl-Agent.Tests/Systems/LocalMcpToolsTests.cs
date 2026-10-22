@@ -2,11 +2,13 @@ using System.Text.Json;
 using AiCtrl.ApiClient;
 using AiCtrl.Client.Commands;
 using AiCtrl.Client.Storage;
+using AiCtrl.Client.Workspace;
 using AiCtrl.Client.Systems;
 using AiCtrl.ClientMCP;
 using AiCtrl.Core.Commands;
 using AiCtrl.Core.Domain;
 using AiCtrl.Core.Runtime;
+using AiCtrl.Tests.Client;
 using AiCtrl.Tests.Commands;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
@@ -19,6 +21,8 @@ public sealed class LocalMcpToolsTests : IAsyncLifetime
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "aictrl-tests", Guid.NewGuid().ToString("N"));
 
+    private readonly string _workspaceRoot;
+
     private ScriptedProviderInstance _instance = null!;
 
     private StateSystem _state = null!;
@@ -30,6 +34,11 @@ public sealed class LocalMcpToolsTests : IAsyncLifetime
     private LocalApiClient _client = null!;
 
     private LocalTools _tools = null!;
+
+    public LocalMcpToolsTests()
+    {
+        _workspaceRoot = Path.Combine(_directory, "workspace");
+    }
 
     public async ValueTask InitializeAsync()
     {
@@ -52,11 +61,25 @@ public sealed class LocalMcpToolsTests : IAsyncLifetime
             TimeProvider.System,
             NullLogger<AbortAndPromptRunner>.Instance);
 
+        Directory.CreateDirectory(_workspaceRoot);
+        await File.WriteAllTextAsync(Path.Combine(_workspaceRoot, "note.txt"), "hello mcp", ct);
+        var workspace = new WorkspaceDefinition(
+            "test",
+            _workspaceRoot,
+            AllowUpload: true,
+            AllowDownload: true,
+            AllowMkdir: true,
+            AllowDelete: false,
+            DenyPatterns: []);
+        var workspaces = new WorkspaceRegistry(new WorkspaceOptions([workspace], []));
+        var files = new FilesSystem(workspaces);
         var commands = new CommandSystem(
             new JournalStore(db),
             _actors,
             registry,
             runner,
+            files,
+            TestTransferSystem.Create(db, workspaces),
             TimeProvider.System,
             NullLogger<CommandSystem>.Instance);
 
@@ -74,6 +97,7 @@ public sealed class LocalMcpToolsTests : IAsyncLifetime
             commands,
             registry,
             _state,
+            files,
             new LocalApiOptions { Port = 0, TokenPath = Path.Combine(_directory, "local-token") },
             TimeProvider.System,
             NullLoggerFactory.Instance);
@@ -124,6 +148,27 @@ public sealed class LocalMcpToolsTests : IAsyncLifetime
 
         messages.IsError.ShouldNotBe(true);
         messages.StructuredContent!.Value.GetProperty("data").GetProperty("messages").GetArrayLength().ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task File_tools_read_through_local_api()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var workspaces = await _tools.ListWorkspacesAsync(ct);
+        workspaces.IsError.ShouldNotBe(true);
+        var workspaceId = workspaces.StructuredContent!.Value
+            .GetProperty("data")[0]
+            .GetProperty("workspaceId")
+            .GetString()
+            .ShouldNotBeNull();
+
+        var files = await _tools.ListFilesAsync(workspaceId, path: null, ct: ct);
+        files.IsError.ShouldNotBe(true);
+        TextOf(files).ShouldContain("note.txt");
+
+        var content = await _tools.ReadTextFileAsync(workspaceId, "note.txt", ct);
+        content.IsError.ShouldNotBe(true);
+        TextOf(content).ShouldContain("hello mcp");
     }
 
     [Fact]

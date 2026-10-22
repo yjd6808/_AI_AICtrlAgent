@@ -57,12 +57,139 @@ public sealed class ServerApiClient : IDisposable
         return await ReadAsync(response, AcJsonContext.Default.AgentTokenResponse, ct).ConfigureAwait(false);
     }
 
+    public async Task<TransferStatusView> GetTransferAsync(
+        string transferId,
+        string token,
+        CancellationToken ct)
+    {
+        using var response = await SendAsync(
+            HttpMethod.Get,
+            "/api/v1/agent/transfers/" + Uri.EscapeDataString(transferId),
+            token,
+            null,
+            ct).ConfigureAwait(false);
+        var body = await ReadAsync(response, AcJsonContext.Default.ApiResponseTransferStatusView, ct).ConfigureAwait(false);
+        return body.Data;
+    }
+
+    public async Task<TransferStatusView> BeginTransferAsync(
+        string transferId,
+        TransferBeginRequest request,
+        string token,
+        CancellationToken ct)
+    {
+        using var response = await SendAsync(
+            HttpMethod.Post,
+            "/api/v1/agent/transfers/" + Uri.EscapeDataString(transferId) + "/begin",
+            token,
+            JsonContent.Create(request, AcJsonContext.Default.TransferBeginRequest),
+            ct).ConfigureAwait(false);
+        var body = await ReadAsync(response, AcJsonContext.Default.ApiResponseTransferStatusView, ct).ConfigureAwait(false);
+        return body.Data;
+    }
+
+    public async Task<TransferStatusView> PutTransferChunkAsync(
+        string transferId,
+        int index,
+        ReadOnlyMemory<byte> data,
+        string token,
+        CancellationToken ct)
+    {
+        using var content = new ByteArrayContent(data.ToArray());
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        using var response = await SendAsync(
+            HttpMethod.Put,
+            "/api/v1/agent/transfers/" + Uri.EscapeDataString(transferId) + "/chunks/"
+                + index.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            token,
+            content,
+            ct).ConfigureAwait(false);
+        var body = await ReadAsync(response, AcJsonContext.Default.ApiResponseTransferStatusView, ct).ConfigureAwait(false);
+        return body.Data;
+    }
+
+    public async Task<TransferStatusView> CompleteTransferAsync(
+        string transferId,
+        string token,
+        CancellationToken ct)
+    {
+        using var response = await SendAsync(
+            HttpMethod.Post,
+            "/api/v1/agent/transfers/" + Uri.EscapeDataString(transferId) + "/complete",
+            token,
+            null,
+            ct).ConfigureAwait(false);
+        var body = await ReadAsync(response, AcJsonContext.Default.ApiResponseTransferStatusView, ct).ConfigureAwait(false);
+        return body.Data;
+    }
+
+    public async Task CopyTransferContentAsync(
+        string transferId,
+        string token,
+        long offset,
+        Stream destination,
+        CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            new Uri(BaseUrl + "/api/v1/agent/transfers/" + Uri.EscapeDataString(transferId) + "/content"));
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        if (offset > 0)
+        {
+            request.Headers.Range = new RangeHeaderValue(offset, null);
+        }
+
+        using var response = await _http
+            .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct)
+            .ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            var problem = await ReadProblemAsync(response, ct).ConfigureAwait(false);
+            throw new AcApiException(
+                (int)response.StatusCode,
+                problem?.Code ?? AcErrorCodes.InternalError,
+                problem?.Detail ?? response.ReasonPhrase ?? "Transfer content request failed.");
+        }
+
+        await response.Content.CopyToAsync(destination, ct).ConfigureAwait(false);
+    }
+
+    public async Task ReleaseTransferAsync(string transferId, string token, CancellationToken ct)
+    {
+        using var response = await SendAsync(
+            HttpMethod.Post,
+            "/api/v1/agent/transfers/" + Uri.EscapeDataString(transferId) + "/release",
+            token,
+            null,
+            ct).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            var problem = await ReadProblemAsync(response, ct).ConfigureAwait(false);
+            throw new AcApiException(
+                (int)response.StatusCode,
+                problem?.Code ?? AcErrorCodes.InternalError,
+                problem?.Detail ?? response.ReasonPhrase ?? "Transfer release failed.");
+        }
+    }
+
     public void Dispose()
     {
         if (_owns)
         {
             _http.Dispose();
         }
+    }
+
+    private async Task<HttpResponseMessage> SendAsync(
+        HttpMethod method,
+        string path,
+        string token,
+        HttpContent? content,
+        CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(method, new Uri(BaseUrl + path)) { Content = content };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        return await _http.SendAsync(request, ct).ConfigureAwait(false);
     }
 
     private async Task<HttpResponseMessage> PostAsync<T>(

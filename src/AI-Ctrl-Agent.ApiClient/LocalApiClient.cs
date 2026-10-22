@@ -5,6 +5,7 @@ using System.Text.Json.Serialization.Metadata;
 using AiCtrl.Core.Api;
 using AiCtrl.Core.Commands;
 using AiCtrl.Core.Domain;
+using AiCtrl.Core.Protocol;
 using AiCtrl.Core.Serialization;
 
 namespace AiCtrl.ApiClient;
@@ -148,6 +149,48 @@ public sealed class LocalApiClient : IDisposable
 
     public Task<ApiResponse<CommandView>> GetCommandAsync(string commandId, CancellationToken ct) =>
         GetAsync($"{LocalPrefix}/commands/{Escape(commandId)}", AcJsonContext.Default.ApiResponseCommandView, ct);
+
+    public Task<ApiResponse<List<WorkspaceInfo>>> ListWorkspacesAsync(CancellationToken ct) =>
+        GetAsync($"{LocalPrefix}/workspaces", AcJsonContext.Default.ApiResponseListWorkspaceInfo, ct);
+
+    public Task<ApiResponse<FileListPage>> ListFilesAsync(
+        string workspaceId,
+        string? path,
+        string sort,
+        string? cursor,
+        int limit,
+        CancellationToken ct)
+    {
+        var query = Query(
+            ("workspaceId", workspaceId),
+            ("path", path),
+            ("sort", sort),
+            ("cursor", cursor),
+            ("limit", limit.ToString()));
+        return GetAsync($"{LocalPrefix}/files{query}", AcJsonContext.Default.ApiResponseFileListPage, ct);
+    }
+
+    public Task<ApiResponse<FileStatView>> StatFileAsync(
+        string workspaceId,
+        string path,
+        bool hash,
+        CancellationToken ct)
+    {
+        var query = Query(
+            ("workspaceId", workspaceId),
+            ("path", path),
+            ("hash", hash ? "true" : "false"));
+        return GetAsync($"{LocalPrefix}/files/stat{query}", AcJsonContext.Default.ApiResponseFileStatView, ct);
+    }
+
+    public Task<ApiResponse<FilePreviewView>> PreviewFileAsync(
+        string workspaceId,
+        string path,
+        CancellationToken ct)
+    {
+        var query = Query(("workspaceId", workspaceId), ("path", path));
+        return GetAsync($"{LocalPrefix}/files/preview{query}", AcJsonContext.Default.ApiResponseFilePreviewView, ct);
+    }
 
     public void Dispose()
     {

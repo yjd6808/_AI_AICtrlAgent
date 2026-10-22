@@ -1,12 +1,17 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using AiCtrl.Client.Link;
 using AiCtrl.Client.Storage;
 using AiCtrl.Client.Systems;
+using AiCtrl.Client.Transfers;
+using AiCtrl.Client.Workspace;
 using AiCtrl.Core.Api;
 using AiCtrl.Core.Commands;
 using AiCtrl.Core.Domain;
+using AiCtrl.Core.Protocol;
 using AiCtrl.Core.Providers;
 using AiCtrl.Core.Serialization;
+using AiCtrl.Core.Workspace;
 using Microsoft.Extensions.Logging;
 
 namespace AiCtrl.Client.Commands;
@@ -21,6 +26,10 @@ public sealed class CommandSystem
 
     private readonly AbortAndPromptRunner _runner;
 
+    private readonly FilesSystem _files;
+
+    private readonly TransferSystem _transfers;
+
     private readonly TimeProvider _time;
 
     private readonly ILogger<CommandSystem> _logger;
@@ -32,6 +41,8 @@ public sealed class CommandSystem
         SessionActorPool actors,
         IProviderInstanceRegistry registry,
         AbortAndPromptRunner runner,
+        FilesSystem files,
+        TransferSystem transfers,
         TimeProvider time,
         ILogger<CommandSystem> logger)
     {
@@ -39,12 +50,16 @@ public sealed class CommandSystem
         ArgumentNullException.ThrowIfNull(actors);
         ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(runner);
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(transfers);
         ArgumentNullException.ThrowIfNull(time);
         ArgumentNullException.ThrowIfNull(logger);
         _journal = journal;
         _actors = actors;
         _registry = registry;
         _runner = runner;
+        _files = files;
+        _transfers = transfers;
         _time = time;
         _logger = logger;
     }
@@ -292,6 +307,70 @@ public sealed class CommandSystem
                     }, ct).ConfigureAwait(false);
                 }
 
+                case CommandTypes.FilesMkdir:
+                {
+                    var payload = JsonSerializer.Deserialize(envelope.Payload, AcJsonContext.Default.FilesMkdirPayload);
+                    if (payload is null)
+                    {
+                        return CommandResult.Failure(AcErrorCodes.InvalidPayload, "files.mkdir payload is required.");
+                    }
+
+                    return CommandResult.Success(
+                        JsonSerializer.SerializeToElement(_files.Mkdir(payload), AcJsonContext.Default.FileStatView));
+                }
+
+                case CommandTypes.FilesDelete:
+                {
+                    var payload = JsonSerializer.Deserialize(envelope.Payload, AcJsonContext.Default.FilesDeletePayload);
+                    if (payload is null)
+                    {
+                        return CommandResult.Failure(AcErrorCodes.InvalidPayload, "files.delete payload is required.");
+                    }
+
+                    return CommandResult.Success(
+                        JsonSerializer.SerializeToElement(_files.Delete(payload), AcJsonContext.Default.FileMutationResult));
+                }
+
+                case CommandTypes.FilesRename:
+                {
+                    var payload = JsonSerializer.Deserialize(envelope.Payload, AcJsonContext.Default.FilesRenamePayload);
+                    if (payload is null)
+                    {
+                        return CommandResult.Failure(AcErrorCodes.InvalidPayload, "files.rename payload is required.");
+                    }
+
+                    return CommandResult.Success(
+                        JsonSerializer.SerializeToElement(_files.Rename(payload), AcJsonContext.Default.FileStatView));
+                }
+
+                case CommandTypes.FilesReceive:
+                {
+                    var payload = JsonSerializer.Deserialize(envelope.Payload, AcJsonContext.Default.FilesReceivePayload);
+                    if (payload is null)
+                    {
+                        return CommandResult.Failure(AcErrorCodes.InvalidPayload, "files.receive payload is required.");
+                    }
+
+                    return CommandResult.Success(
+                        JsonSerializer.SerializeToElement(
+                            await _transfers.ReceiveAsync(payload, ct).ConfigureAwait(false),
+                            AcJsonContext.Default.FileMutationResult));
+                }
+
+                case CommandTypes.FilesSend:
+                {
+                    var payload = JsonSerializer.Deserialize(envelope.Payload, AcJsonContext.Default.FilesSendPayload);
+                    if (payload is null)
+                    {
+                        return CommandResult.Failure(AcErrorCodes.InvalidPayload, "files.send payload is required.");
+                    }
+
+                    return CommandResult.Success(
+                        JsonSerializer.SerializeToElement(
+                            await _transfers.SendAsync(payload, ct).ConfigureAwait(false),
+                            AcJsonContext.Default.FileMutationResult));
+                }
+
                 case CommandTypes.InstanceRefresh:
                     return CommandResult.Success(null);
 
@@ -304,6 +383,22 @@ public sealed class CommandSystem
         catch (JsonException ex)
         {
             return CommandResult.Failure(AcErrorCodes.InvalidPayload, ex.Message);
+        }
+        catch (WorkspacePathException ex)
+        {
+            return CommandResult.Failure(ex.Code, ex.Message);
+        }
+        catch (WorkspaceException ex)
+        {
+            return CommandResult.Failure(ex.Code, ex.Message);
+        }
+        catch (ClientTransferException ex)
+        {
+            return CommandResult.Failure(ex.Code, ex.Message);
+        }
+        catch (AcApiException ex)
+        {
+            return CommandResult.Failure(ex.Code, ex.Message);
         }
     }
 

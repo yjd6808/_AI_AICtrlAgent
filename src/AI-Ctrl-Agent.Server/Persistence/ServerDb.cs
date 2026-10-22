@@ -72,6 +72,29 @@ public sealed class ServerDb
                 as_of TEXT NOT NULL,
                 PRIMARY KEY (machine_id, cache_key)
             );
+            CREATE TABLE IF NOT EXISTS transfers (
+                id TEXT NOT NULL PRIMARY KEY,
+                machine_id TEXT NOT NULL,
+                direction TEXT NOT NULL,
+                workspace_id TEXT NOT NULL,
+                rel_path TEXT NOT NULL,
+                rel_dir TEXT NULL,
+                file_name TEXT NOT NULL,
+                conflict TEXT NULL,
+                as_zip INTEGER NOT NULL,
+                size INTEGER NOT NULL,
+                sha256 TEXT NULL,
+                chunk_size INTEGER NOT NULL,
+                chunks_total INTEGER NOT NULL,
+                received_json TEXT NOT NULL,
+                status TEXT NOT NULL,
+                error TEXT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS ix_transfers_machine_created ON transfers (machine_id, created_at);
+            CREATE INDEX IF NOT EXISTS ix_transfers_status ON transfers (status);
             """,
             ct).ConfigureAwait(false);
     }

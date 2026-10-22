@@ -37,6 +37,18 @@ public sealed class ClientDb
             last_busy_at TEXT NOT NULL,
             PRIMARY KEY (instance_id, session_id)
         );
+        CREATE TABLE IF NOT EXISTS transfers (
+            transfer_id TEXT NOT NULL PRIMARY KEY,
+            direction TEXT NOT NULL,
+            workspace_id TEXT NOT NULL,
+            rel_path TEXT NOT NULL,
+            size INTEGER NOT NULL,
+            sha256 TEXT NULL,
+            received_json TEXT NOT NULL DEFAULT '[]',
+            status TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS ix_transfers_status ON transfers(status);
         """;
 
     private readonly string _connectionString;
@@ -145,6 +157,84 @@ public sealed class ClientDb
         await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
+    public async Task UpsertTransferAsync(ClientTransferRecord record, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        await using var connection = await OpenAsync(ct).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO transfers (transfer_id, direction, workspace_id, rel_path, size, sha256, received_json, status, updated_at)
+            VALUES ($id, $direction, $workspace, $path, $size, $sha, $received, $status, $now)
+            ON CONFLICT(transfer_id) DO UPDATE SET
+                size = excluded.size,
+                sha256 = excluded.sha256,
+                received_json = excluded.received_json,
+                status = excluded.status,
+                updated_at = excluded.updated_at;
+            """;
+        command.Parameters.AddWithValue("$id", record.TransferId);
+        command.Parameters.AddWithValue("$direction", record.Direction);
+        command.Parameters.AddWithValue("$workspace", record.WorkspaceId);
+        command.Parameters.AddWithValue("$path", record.RelPath);
+        command.Parameters.AddWithValue("$size", record.Size);
+        command.Parameters.AddWithValue("$sha", (object?)record.Sha256 ?? DBNull.Value);
+        command.Parameters.AddWithValue("$received", record.ReceivedJson);
+        command.Parameters.AddWithValue("$status", record.Status);
+        command.Parameters.AddWithValue("$now", _time.GetUtcNow().ToString("O", CultureInfo.InvariantCulture));
+        await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    public async Task<ClientTransferRecord?> GetTransferAsync(string transferId, CancellationToken ct)
+    {
+        await using var connection = await OpenAsync(ct).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT transfer_id, direction, workspace_id, rel_path, size, sha256, received_json, status
+            FROM transfers WHERE transfer_id = $id;
+            """;
+        command.Parameters.AddWithValue("$id", transferId);
+        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        return await reader.ReadAsync(ct).ConfigureAwait(false) ? ReadTransfer(reader) : null;
+    }
+
+    public async Task<IReadOnlyList<ClientTransferRecord>> ListActiveTransfersAsync(CancellationToken ct)
+    {
+        await using var connection = await OpenAsync(ct).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT transfer_id, direction, workspace_id, rel_path, size, sha256, received_json, status
+            FROM transfers WHERE status NOT IN ('completed', 'failed') ORDER BY updated_at;
+            """;
+        await using var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        var results = new List<ClientTransferRecord>();
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            results.Add(ReadTransfer(reader));
+        }
+
+        return results;
+    }
+
+    public async Task DeleteTransferAsync(string transferId, CancellationToken ct)
+    {
+        await using var connection = await OpenAsync(ct).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM transfers WHERE transfer_id = $id;";
+        command.Parameters.AddWithValue("$id", transferId);
+        await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    private static ClientTransferRecord ReadTransfer(SqliteDataReader reader) =>
+        new(
+            reader.GetString(0),
+            reader.GetString(1),
+            reader.GetString(2),
+            reader.GetString(3),
+            reader.GetInt64(4),
+            reader.IsDBNull(5) ? null : reader.GetString(5),
+            reader.GetString(6),
+            reader.GetString(7));
+
     private static async Task SetValueAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
@@ -173,3 +263,13 @@ public sealed class ClientDb
         return string.IsNullOrEmpty(value) ? null : new MachineId(value);
     }
 }
+
+public sealed record ClientTransferRecord(
+    string TransferId,
+    string Direction,
+    string WorkspaceId,
+    string RelPath,
+    long Size,
+    string? Sha256,
+    string ReceivedJson,
+    string Status);

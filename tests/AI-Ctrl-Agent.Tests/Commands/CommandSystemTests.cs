@@ -1,7 +1,9 @@
 using System.Text.Json;
 using AiCtrl.Client.Commands;
 using AiCtrl.Client.Storage;
+using AiCtrl.Client.Workspace;
 using AiCtrl.Core.Api;
+using AiCtrl.Tests.Client;
 using AiCtrl.Core.Commands;
 using AiCtrl.Core.Domain;
 using AiCtrl.Core.Serialization;
@@ -47,6 +49,8 @@ public sealed class CommandSystemTests : IAsyncLifetime
             _actors,
             registry,
             runner,
+            new FilesSystem(new WorkspaceRegistry(new WorkspaceOptions([], []))),
+            TestTransferSystem.Create(db, new WorkspaceRegistry(new WorkspaceOptions([], []))),
             TimeProvider.System,
             NullLogger<CommandSystem>.Instance);
     }

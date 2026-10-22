@@ -3,6 +3,8 @@ using AiCtrl.Client.Commands;
 using AiCtrl.Client.Link;
 using AiCtrl.Client.Security;
 using AiCtrl.Client.Storage;
+using AiCtrl.Client.Transfers;
+using AiCtrl.Client.Workspace;
 using AiCtrl.Client.Systems;
 using AiCtrl.Core.Domain;
 using AiCtrl.Core.Providers;
@@ -85,11 +87,16 @@ public sealed class ServerLinkSystemTests : IAsyncLifetime
                 TimeSpan.FromMilliseconds(60)),
             TimeProvider.System,
             NullLogger<AbortAndPromptRunner>.Instance);
+        var workspaces = new WorkspaceRegistry(new WorkspaceOptions([], []));
+        var files = new FilesSystem(workspaces);
+        var linkState = new TransferLinkState();
         var commands = new CommandSystem(
             journal,
             _actors,
             _registry,
             runner,
+            files,
+            TestTransferSystem.Create(_db, workspaces, linkState),
             TimeProvider.System,
             NullLogger<CommandSystem>.Instance);
         var state = new StateSystem(TimeProvider.System, new MonitorOptions(), NullLoggerFactory.Instance);
@@ -98,6 +105,7 @@ public sealed class ServerLinkSystemTests : IAsyncLifetime
             journal,
             _registry,
             state,
+            files,
             TimeProvider.System,
             NullLogger<ClientRequestHandler>.Instance);
         _events = new ProviderEventBroker(NullLogger<ProviderEventBroker>.Instance);
@@ -115,6 +123,7 @@ public sealed class ServerLinkSystemTests : IAsyncLifetime
             requests,
             _streams,
             _push,
+            linkState,
             new ServerLinkOptions
             {
                 BaseUrl = _host.BaseUrl,

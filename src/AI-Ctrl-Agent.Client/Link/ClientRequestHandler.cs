@@ -3,12 +3,14 @@ using System.Text.Json;
 using AiCtrl.Client.Commands;
 using AiCtrl.Client.Storage;
 using AiCtrl.Client.Systems;
+using AiCtrl.Client.Workspace;
 using AiCtrl.Core.Api;
 using AiCtrl.Core.Commands;
 using AiCtrl.Core.Domain;
 using AiCtrl.Core.Providers;
 using AiCtrl.Core.Protocol;
 using AiCtrl.Core.Serialization;
+using AiCtrl.Core.Workspace;
 using Microsoft.Extensions.Logging;
 
 namespace AiCtrl.Client.Link;
@@ -23,6 +25,8 @@ public sealed class ClientRequestHandler
 
     private readonly StateSystem _state;
 
+    private readonly FilesSystem _files;
+
     private readonly TimeProvider _time;
 
     private readonly ILogger<ClientRequestHandler> _logger;
@@ -32,6 +36,7 @@ public sealed class ClientRequestHandler
         JournalStore journal,
         IProviderInstanceRegistry registry,
         StateSystem state,
+        FilesSystem files,
         TimeProvider time,
         ILogger<ClientRequestHandler> logger)
     {
@@ -39,12 +44,14 @@ public sealed class ClientRequestHandler
         ArgumentNullException.ThrowIfNull(journal);
         ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(time);
         ArgumentNullException.ThrowIfNull(logger);
         _commands = commands;
         _journal = journal;
         _registry = registry;
         _state = state;
+        _files = files;
         _time = time;
         _logger = logger;
     }
@@ -115,14 +122,15 @@ public sealed class ClientRequestHandler
         }
         catch (QueryException ex)
         {
-            return new ResponsePacket(
-                packet.RequestId,
-                ResponseStatus.Failed,
-                null,
-                ex.Code,
-                ex.Message,
-                _time.GetUtcNow(),
-                (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+            return Failure(packet, started, ex.Code, ex.Message);
+        }
+        catch (WorkspacePathException ex)
+        {
+            return Failure(packet, started, ex.Code, ex.Message);
+        }
+        catch (WorkspaceException ex)
+        {
+            return Failure(packet, started, ex.Code, ex.Message);
         }
         catch (Exception ex)
         {
@@ -173,6 +181,41 @@ public sealed class ClientRequestHandler
     {
         switch (packet.Type)
         {
+            case QueryTypes.WorkspaceList:
+            {
+                var sessions = await LoadSessionsAsync(ct).ConfigureAwait(false);
+                return JsonSerializer.SerializeToElement(
+                    _files.GetWorkspaceInfos(sessions),
+                    AcJsonContext.Default.ListWorkspaceInfo);
+            }
+
+            case QueryTypes.FilesList:
+            {
+                var query = Deserialize(packet, AcJsonContext.Default.FileListQuery)
+                    ?? throw new QueryException(AcErrorCodes.InvalidPayload, "files.list payload is required.");
+                return JsonSerializer.SerializeToElement(
+                    _files.List(query),
+                    AcJsonContext.Default.FileListPage);
+            }
+
+            case QueryTypes.FilesStat:
+            {
+                var query = Deserialize(packet, AcJsonContext.Default.FileStatQuery)
+                    ?? throw new QueryException(AcErrorCodes.InvalidPayload, "files.stat payload is required.");
+                return JsonSerializer.SerializeToElement(
+                    await _files.StatAsync(query, ct).ConfigureAwait(false),
+                    AcJsonContext.Default.FileStatView);
+            }
+
+            case QueryTypes.FilesPreview:
+            {
+                var query = Deserialize(packet, AcJsonContext.Default.FilePreviewQuery)
+                    ?? throw new QueryException(AcErrorCodes.InvalidPayload, "files.preview payload is required.");
+                return JsonSerializer.SerializeToElement(
+                    _files.Preview(query),
+                    AcJsonContext.Default.FilePreviewView);
+            }
+
             case QueryTypes.AgentInstances:
             {
                 var query = Deserialize(packet, AcJsonContext.Default.AgentInstancesQuery);
@@ -281,6 +324,32 @@ public sealed class ClientRequestHandler
                     $"Query type '{packet.Type}' is not supported by the client.");
         }
     }
+
+    private async Task<List<SessionSummary>> LoadSessionsAsync(CancellationToken ct)
+    {
+        var sessions = new List<SessionSummary>();
+        foreach (var instance in _registry.Instances)
+        {
+            var items = await instance
+                .ListSessionsAsync(
+                    new SessionQuery(instance.Info.Id, SessionListViews.All, IncludeChildren: true, Cursor: null),
+                    ct)
+                .ConfigureAwait(false);
+            sessions.AddRange(items);
+        }
+
+        return sessions;
+    }
+
+    private ResponsePacket Failure(RequestPacket packet, long started, string code, string message) =>
+        new(
+            packet.RequestId,
+            ResponseStatus.Failed,
+            null,
+            code,
+            message,
+            _time.GetUtcNow(),
+            (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds);
 
     private IProviderInstance? ResolveInstance(string instanceId) =>
         _registry.Instances.FirstOrDefault(instance => string.Equals(

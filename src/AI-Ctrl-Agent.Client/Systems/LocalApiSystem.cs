@@ -7,12 +7,15 @@ using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using AiCtrl.Client.Commands;
 using AiCtrl.Client.Storage;
+using AiCtrl.Client.Workspace;
 using AiCtrl.Core.Api;
 using AiCtrl.Core.Commands;
 using AiCtrl.Core.Domain;
 using AiCtrl.Core.Providers;
+using AiCtrl.Core.Protocol;
 using AiCtrl.Core.Runtime;
 using AiCtrl.Core.Serialization;
+using AiCtrl.Core.Workspace;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -41,6 +44,8 @@ public sealed class LocalApiSystem : IAcSystem
 
     private readonly StateSystem _state;
 
+    private readonly FilesSystem _files;
+
     private readonly LocalApiOptions _options;
 
     private readonly LocalTokenStore _tokens;
@@ -61,6 +66,7 @@ public sealed class LocalApiSystem : IAcSystem
         CommandSystem commands,
         IProviderInstanceRegistry registry,
         StateSystem state,
+        FilesSystem files,
         LocalApiOptions options,
         TimeProvider time,
         ILoggerFactory logs)
@@ -68,12 +74,14 @@ public sealed class LocalApiSystem : IAcSystem
         ArgumentNullException.ThrowIfNull(commands);
         ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(time);
         ArgumentNullException.ThrowIfNull(logs);
         _commands = commands;
         _registry = registry;
         _state = state;
+        _files = files;
         _options = options;
         _tokens = new LocalTokenStore(options.TokenPath);
         _time = time;
@@ -413,6 +421,209 @@ public sealed class LocalApiSystem : IAcSystem
                     new ApiResponse<CommandView>(view, Meta(context, started)),
                     AcJsonContext.Default.ApiResponseCommandView);
             });
+
+        app.MapGet(
+            $"{PathPrefix}/workspaces",
+            async (HttpContext context, CancellationToken ct) =>
+            {
+                var started = Stopwatch.GetTimestamp();
+                var sessions = await ListSessionsAsync(null, SessionListViews.All, ct).ConfigureAwait(false);
+                return Json(
+                    new ApiResponse<List<WorkspaceInfo>>(
+                        _files.GetWorkspaceInfos(sessions.Sessions).ToList(),
+                        Meta(context, started)),
+                    AcJsonContext.Default.ApiResponseListWorkspaceInfo);
+            });
+
+        app.MapGet(
+            $"{PathPrefix}/files",
+            (HttpContext context, string workspaceId, string? path, string? sort, string? cursor, int? limit) =>
+            {
+                var started = Stopwatch.GetTimestamp();
+                try
+                {
+                    var page = _files.List(new FileListQuery(
+                        workspaceId,
+                        path,
+                        sort ?? FileSorts.Name,
+                        cursor,
+                        limit ?? 500));
+                    return Json(
+                        new ApiResponse<FileListPage>(page, Meta(context, started)),
+                        AcJsonContext.Default.ApiResponseFileListPage);
+                }
+                catch (WorkspacePathException ex)
+                {
+                    return WorkspaceProblem(context, ex.Code, ex.Message);
+                }
+                catch (WorkspaceException ex)
+                {
+                    return WorkspaceProblem(context, ex.Code, ex.Message);
+                }
+            });
+
+        app.MapGet(
+            $"{PathPrefix}/files/stat",
+            async (HttpContext context, string workspaceId, string path, bool? hash, CancellationToken ct) =>
+            {
+                var started = Stopwatch.GetTimestamp();
+                try
+                {
+                    var stat = await _files
+                        .StatAsync(new FileStatQuery(workspaceId, path, hash ?? false), ct)
+                        .ConfigureAwait(false);
+                    return Json(
+                        new ApiResponse<FileStatView>(stat, Meta(context, started)),
+                        AcJsonContext.Default.ApiResponseFileStatView);
+                }
+                catch (WorkspacePathException ex)
+                {
+                    return WorkspaceProblem(context, ex.Code, ex.Message);
+                }
+                catch (WorkspaceException ex)
+                {
+                    return WorkspaceProblem(context, ex.Code, ex.Message);
+                }
+            });
+
+        app.MapGet(
+            $"{PathPrefix}/files/preview",
+            (HttpContext context, string workspaceId, string path) =>
+            {
+                var started = Stopwatch.GetTimestamp();
+                try
+                {
+                    var preview = _files.Preview(new FilePreviewQuery(workspaceId, path));
+                    return Json(
+                        new ApiResponse<FilePreviewView>(preview, Meta(context, started)),
+                        AcJsonContext.Default.ApiResponseFilePreviewView);
+                }
+                catch (WorkspacePathException ex)
+                {
+                    return WorkspaceProblem(context, ex.Code, ex.Message);
+                }
+                catch (WorkspaceException ex)
+                {
+                    return WorkspaceProblem(context, ex.Code, ex.Message);
+                }
+            });
+
+        app.MapPost(
+            $"{PathPrefix}/files/mkdir",
+            async (HttpContext context, CancellationToken ct) =>
+            {
+                var started = Stopwatch.GetTimestamp();
+                var payload = await ReadBodyAsync(context, AcJsonContext.Default.FilesMkdirPayload, ct).ConfigureAwait(false);
+                if (payload.Payload is null)
+                {
+                    return InvalidPayload(context, payload.Error ?? "files.mkdir payload is required.");
+                }
+
+                try
+                {
+                    var stat = _files.Mkdir(payload.Payload);
+                    return Json(
+                        new ApiResponse<FileStatView>(stat, Meta(context, started)),
+                        AcJsonContext.Default.ApiResponseFileStatView);
+                }
+                catch (WorkspacePathException ex)
+                {
+                    return WorkspaceProblem(context, ex.Code, ex.Message);
+                }
+                catch (WorkspaceException ex)
+                {
+                    return WorkspaceProblem(context, ex.Code, ex.Message);
+                }
+            });
+
+        app.MapPost(
+            $"{PathPrefix}/files/delete",
+            async (HttpContext context, CancellationToken ct) =>
+            {
+                var started = Stopwatch.GetTimestamp();
+                var payload = await ReadBodyAsync(context, AcJsonContext.Default.FilesDeletePayload, ct).ConfigureAwait(false);
+                if (payload.Payload is null)
+                {
+                    return InvalidPayload(context, payload.Error ?? "files.delete payload is required.");
+                }
+
+                try
+                {
+                    var result = _files.Delete(payload.Payload);
+                    return Json(
+                        new ApiResponse<FileMutationResult>(result, Meta(context, started)),
+                        AcJsonContext.Default.ApiResponseFileMutationResult);
+                }
+                catch (WorkspacePathException ex)
+                {
+                    return WorkspaceProblem(context, ex.Code, ex.Message);
+                }
+                catch (WorkspaceException ex)
+                {
+                    return WorkspaceProblem(context, ex.Code, ex.Message);
+                }
+            });
+
+        app.MapPost(
+            $"{PathPrefix}/files/rename",
+            async (HttpContext context, CancellationToken ct) =>
+            {
+                var started = Stopwatch.GetTimestamp();
+                var payload = await ReadBodyAsync(context, AcJsonContext.Default.FilesRenamePayload, ct).ConfigureAwait(false);
+                if (payload.Payload is null)
+                {
+                    return InvalidPayload(context, payload.Error ?? "files.rename payload is required.");
+                }
+
+                try
+                {
+                    var stat = _files.Rename(payload.Payload);
+                    return Json(
+                        new ApiResponse<FileStatView>(stat, Meta(context, started)),
+                        AcJsonContext.Default.ApiResponseFileStatView);
+                }
+                catch (WorkspacePathException ex)
+                {
+                    return WorkspaceProblem(context, ex.Code, ex.Message);
+                }
+                catch (WorkspaceException ex)
+                {
+                    return WorkspaceProblem(context, ex.Code, ex.Message);
+                }
+            });
+    }
+
+    private static async Task<(T? Payload, string? Error)> ReadBodyAsync<T>(
+        HttpContext context,
+        JsonTypeInfo<T> info,
+        CancellationToken ct)
+    {
+        if (!context.Request.HasJsonContentType())
+        {
+            return (default, "A JSON request body is required.");
+        }
+
+        try
+        {
+            return (await context.Request.ReadFromJsonAsync(info, ct).ConfigureAwait(false), null);
+        }
+        catch (JsonException ex)
+        {
+            return (default, ex.Message);
+        }
+    }
+
+    private static IResult WorkspaceProblem(HttpContext context, string code, string detail)
+    {
+        var status = code switch
+        {
+            AcErrorCodes.PathDenied => StatusCodes.Status403Forbidden,
+            AcErrorCodes.WorkspaceNotAllowed => StatusCodes.Status404NotFound,
+            AcErrorCodes.FileConflict => StatusCodes.Status409Conflict,
+            _ => StatusCodes.Status400BadRequest,
+        };
+
+        return Problem(context, status, code, detail);
     }
 
     private async Task<IResult> ExecuteCommandAsync(

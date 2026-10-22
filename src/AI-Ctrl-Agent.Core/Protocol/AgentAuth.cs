@@ -68,5 +68,7 @@ public static class AgentTokenDefaults
 
     public const string MachineIdClaim = "mid";
 
+    public const string Policy = "agent";
+
     public static readonly TimeSpan ChallengeLifetime = TimeSpan.FromSeconds(60);
 }
