@@ -37,6 +37,16 @@ const LogsPage = lazy(() =>
     default: module.LogsPage,
   })),
 )
+const FilesPage = lazy(() =>
+  import('../features/files/FilesPage').then((module) => ({
+    default: module.FilesPage,
+  })),
+)
+const VpnPage = lazy(() =>
+  import('../features/vpn/VpnPage').then((module) => ({
+    default: module.VpnPage,
+  })),
+)
 const SettingsPage = lazy(() =>
   import('../features/settings/SettingsPage').then((module) => ({
     default: module.SettingsPage,
@@ -124,7 +134,7 @@ export function AppRoutes() {
               path="files/*"
               element={
                 <LazyPage>
-                  <PlaceholderPage kind="files" />
+                  <FilesPage />
                 </LazyPage>
               }
             />
@@ -132,7 +142,7 @@ export function AppRoutes() {
               path="vpn"
               element={
                 <LazyPage>
-                  <PlaceholderPage kind="vpn" />
+                  <VpnPage />
                 </LazyPage>
               }
             />

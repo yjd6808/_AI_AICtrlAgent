@@ -37,7 +37,7 @@ public sealed record SessionPermissionReplyPayload(SessionRef Session, string Pe
 
 public sealed record OpenCodeBackendRestartPayload(InstanceId Instance, bool Force);
 
-public sealed record VpnConnectPayload(string? Server, string? Country, string? City);
+public sealed record VpnConnectPayload(string? Server, string? Country, string? City, bool Force = false);
 
 public sealed record FilesReceivePayload(
     string TransferId,

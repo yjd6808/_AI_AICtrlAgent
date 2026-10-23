@@ -3,6 +3,7 @@ using System.Text.Json;
 using AiCtrl.Client.Commands;
 using AiCtrl.Client.Storage;
 using AiCtrl.Client.Systems;
+using AiCtrl.Client.Vpn;
 using AiCtrl.Client.Workspace;
 using AiCtrl.Core.Api;
 using AiCtrl.Core.Commands;
@@ -31,6 +32,8 @@ public sealed class ClientRequestHandler
 
     private readonly ILogger<ClientRequestHandler> _logger;
 
+    private readonly VpnSystem? _vpn;
+
     public ClientRequestHandler(
         CommandSystem commands,
         JournalStore journal,
@@ -38,7 +41,8 @@ public sealed class ClientRequestHandler
         StateSystem state,
         FilesSystem files,
         TimeProvider time,
-        ILogger<ClientRequestHandler> logger)
+        ILogger<ClientRequestHandler> logger,
+        VpnSystem? vpn = null)
     {
         ArgumentNullException.ThrowIfNull(commands);
         ArgumentNullException.ThrowIfNull(journal);
@@ -54,12 +58,14 @@ public sealed class ClientRequestHandler
         _files = files;
         _time = time;
         _logger = logger;
+        _vpn = vpn;
     }
 
     public async Task<ResponsePacket> HandleAsync(
         RequestPacket packet,
         Func<AckPacket, Task>? acknowledge,
-        CancellationToken ct)
+        CancellationToken ct,
+        Func<ProgressPacket, Task>? progress = null)
     {
         ArgumentNullException.ThrowIfNull(packet);
         var started = Stopwatch.GetTimestamp();
@@ -104,6 +110,7 @@ public sealed class ClientRequestHandler
                             await acknowledge(new AckPacket(packet.RequestId, _time.GetUtcNow())).ConfigureAwait(false);
                         }
                     },
+                    progress,
                     ct)
                 .ConfigureAwait(false);
 
@@ -129,6 +136,10 @@ public sealed class ClientRequestHandler
             return Failure(packet, started, ex.Code, ex.Message);
         }
         catch (WorkspaceException ex)
+        {
+            return Failure(packet, started, ex.Code, ex.Message);
+        }
+        catch (VpnException ex)
         {
             return Failure(packet, started, ex.Code, ex.Message);
         }
@@ -315,6 +326,34 @@ public sealed class ClientRequestHandler
                 return JsonSerializer.SerializeToElement(models, AcJsonContext.Default.ListModelOption);
             }
 
+            case QueryTypes.VpnPage:
+            {
+                var query = Deserialize(packet, AcJsonContext.Default.VpnPageQuery)
+                    ?? new VpnPageQuery(null, null);
+                return JsonSerializer.SerializeToElement(
+                    await VpnOrThrow().GetPageAsync(query, ct).ConfigureAwait(false),
+                    AcJsonContext.Default.VpnPageSnapshot);
+            }
+
+            case QueryTypes.VpnStatus:
+                return JsonSerializer.SerializeToElement(
+                    await VpnOrThrow().GetStatusAsync(ct).ConfigureAwait(false),
+                    AcJsonContext.Default.VpnStatusView);
+
+            case QueryTypes.VpnCountries:
+                return JsonSerializer.SerializeToElement(
+                    await VpnOrThrow().GetCountriesAsync(ct).ConfigureAwait(false),
+                    AcJsonContext.Default.ListVpnCountryView);
+
+            case QueryTypes.VpnServers:
+            {
+                var query = Deserialize(packet, AcJsonContext.Default.VpnServersQuery)
+                    ?? throw new QueryException(AcErrorCodes.InvalidPayload, "vpn.servers payload is required.");
+                return JsonSerializer.SerializeToElement(
+                    await VpnOrThrow().GetServersAsync(query, ct).ConfigureAwait(false),
+                    AcJsonContext.Default.VpnServerPage);
+            }
+
             case QueryTypes.MachineFeatures:
                 return JsonSerializer.SerializeToElement(BuildFeatures(), AcJsonContext.Default.ListMachineFeature);
 
@@ -360,11 +399,14 @@ public sealed class ClientRequestHandler
     private IProviderInstance? ResolveSessionInstance(SessionRef session) =>
         session.Machine == _registry.MachineId ? ResolveInstance(session.Instance.Value) : null;
 
+    private VpnSystem VpnOrThrow() =>
+        _vpn ?? throw new QueryException(AcErrorCodes.CapabilityMissing, "VPN is not available.");
+
     private IReadOnlyList<MachineFeature> BuildFeatures()
     {
         var available = _registry.Instances.Count > 0;
-        return
-        [
+        var features = new List<MachineFeature>
+        {
             new MachineFeature(
                 "sessions",
                 FeatureSection.Agents,
@@ -381,7 +423,24 @@ public sealed class ClientRequestHandler
                 true,
                 null,
                 null),
-        ];
+        };
+
+        if (_vpn is not null)
+        {
+            var vpnAvailable = _vpn.Enabled && _vpn.CliFound;
+            features.Add(new MachineFeature(
+                "vpn.protonvpn",
+                FeatureSection.Etc,
+                "ProtonVPN",
+                "/vpn",
+                vpnAvailable,
+                !_vpn.Enabled
+                    ? "VPN is disabled in client configuration."
+                    : _vpn.CliFound ? null : "protonvpn CLI was not found.",
+                null));
+        }
+
+        return features;
     }
 
     private static T? Deserialize<T>(RequestPacket packet, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo) =>

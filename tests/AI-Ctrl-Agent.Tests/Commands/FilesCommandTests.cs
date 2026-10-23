@@ -3,6 +3,7 @@ using AiCtrl.Client.Commands;
 using AiCtrl.Client.Storage;
 using AiCtrl.Client.Workspace;
 using AiCtrl.Core.Api;
+using AiCtrl.Core.Config;
 using AiCtrl.Tests.Client;
 using AiCtrl.Core.Commands;
 using AiCtrl.Core.Domain;
@@ -10,6 +11,7 @@ using AiCtrl.Core.Protocol;
 using AiCtrl.Core.Serialization;
 using AiCtrl.Tests.Systems;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Shouldly;
 
@@ -24,6 +26,8 @@ public sealed class FilesCommandTests : IAsyncLifetime
     private CommandSystem _commands = null!;
 
     private string _workspaceId = null!;
+
+    private string _overridesPath = null!;
 
     public async ValueTask InitializeAsync()
     {
@@ -40,8 +44,9 @@ public sealed class FilesCommandTests : IAsyncLifetime
             AllowMkdir: true,
             AllowDelete: true,
             DenyPatterns: []);
-        var registry = new WorkspaceRegistry(new WorkspaceOptions([workspace], []));
+        var registry = new WorkspaceRegistry(new WorkspaceOptions([workspace], [_directory]));
         _workspaceId = registry.Entries[0].WorkspaceId;
+        _overridesPath = Path.Combine(_directory, "client.overrides.yaml");
 
         _actors = new SessionActorPool(NullLoggerFactory.Instance);
         var providerRegistry = new FakeProviderInstanceRegistry(new MachineId("m_test"), []);
@@ -60,7 +65,8 @@ public sealed class FilesCommandTests : IAsyncLifetime
             new FilesSystem(registry),
             TestTransferSystem.Create(db, registry),
             TimeProvider.System,
-            NullLogger<CommandSystem>.Instance);
+            NullLogger<CommandSystem>.Instance,
+            new WorkspaceRegistrationStore(_overridesPath));
     }
 
     public async ValueTask DisposeAsync()
@@ -130,6 +136,53 @@ public sealed class FilesCommandTests : IAsyncLifetime
 
         result.Status.ShouldBe(CommandStatus.Failed);
         result.ErrorCode.ShouldBe(AcErrorCodes.PathInvalid);
+    }
+
+    [Fact]
+    public async Task Workspace_register_adds_workspace_and_persists_override()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var root = Path.Combine(_directory, "new-workspace");
+        Directory.CreateDirectory(root);
+
+        var result = await _commands.ExecuteAsync(
+            Envelope(
+                "cmd_register",
+                CommandTypes.WorkspaceRegister,
+                JsonSerializer.SerializeToElement(
+                    new WorkspaceRegisterPayload(root),
+                    AcJsonContext.Default.WorkspaceRegisterPayload)),
+            ct);
+
+        result.Status.ShouldBe(CommandStatus.Succeeded);
+        result.Result!.Value.GetProperty("root").GetString().ShouldBe(root);
+
+        File.Exists(_overridesPath).ShouldBeTrue();
+        var configuration = new ConfigurationBuilder()
+            .AddAcYamlFile(_overridesPath)
+            .Build();
+        var reloaded = WorkspaceOptions.FromConfiguration(configuration);
+        reloaded.Workspaces.ShouldContain(workspace => workspace.Root == root);
+    }
+
+    [Fact]
+    public async Task Workspace_register_rejects_path_outside_parents()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var outside = Path.Combine(Path.GetTempPath(), "aictrl-tests-outside", Guid.NewGuid().ToString("N"));
+
+        var result = await _commands.ExecuteAsync(
+            Envelope(
+                "cmd_register_outside",
+                CommandTypes.WorkspaceRegister,
+                JsonSerializer.SerializeToElement(
+                    new WorkspaceRegisterPayload(outside),
+                    AcJsonContext.Default.WorkspaceRegisterPayload)),
+            ct);
+
+        result.Status.ShouldBe(CommandStatus.Failed);
+        result.ErrorCode.ShouldBe(AcErrorCodes.WorkspaceNotAllowed);
+        File.Exists(_overridesPath).ShouldBeFalse();
     }
 
     private static CommandEnvelope Envelope(string commandId, string type, JsonElement payload) =>

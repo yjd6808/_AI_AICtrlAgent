@@ -8,5 +8,9 @@ for /d /r "%P%tests" %%d in (bin obj TestResults) do @if exist "%%d" rmdir /s /q
 rmdir /s /q "%P%TestResults" 2>nul
 if exist "%P%web\ai-ctrl-web\node_modules" rmdir /s /q "%P%web\ai-ctrl-web\node_modules" 2>nul
 if exist "%P%web\ai-ctrl-web\dist" rmdir /s /q "%P%web\ai-ctrl-web\dist" 2>nul
-echo CLEAN OK: %P% (bin/obj/TestResults/node_modules/dist removed, sources kept)
+if exist "%P%web\ai-ctrl-web\test-results" rmdir /s /q "%P%web\ai-ctrl-web\test-results" 2>nul
+if exist "%P%web\ai-ctrl-web\playwright-report" rmdir /s /q "%P%web\ai-ctrl-web\playwright-report" 2>nul
+if exist "%P%web\ai-ctrl-web\blob-report" rmdir /s /q "%P%web\ai-ctrl-web\blob-report" 2>nul
+if exist "%P%web\ai-ctrl-web\playwright\.cache" rmdir /s /q "%P%web\ai-ctrl-web\playwright\.cache" 2>nul
+echo CLEAN OK: %P% (bin/obj/TestResults/node_modules/dist/playwright artifacts removed, sources kept)
 exit /b 0

@@ -157,7 +157,7 @@ public sealed class TransferStore
             Direction = TransferDirections.Download,
             WorkspaceId = workspaceId,
             RelPath = request.RelPath,
-            FileName = Path.GetFileName(request.RelPath),
+            FileName = DownloadFileName(request.RelPath, request.AsZip),
             AsZip = request.AsZip,
             Size = 0,
             ChunkSize = _options.ChunkBytes,
@@ -203,10 +203,17 @@ public sealed class TransferStore
                     "The transfer is not a download.");
             }
 
+            var normalized = NormalizeSha256(sha256);
+            var layoutChanged = entity.Size != size
+                || !string.Equals(entity.Sha256, normalized, StringComparison.OrdinalIgnoreCase);
             entity.Size = size;
-            entity.Sha256 = NormalizeSha256(sha256);
+            entity.Sha256 = normalized;
             entity.ChunksTotal = ChunkCount(size, entity.ChunkSize);
-            entity.ReceivedJson = "[]";
+            if (layoutChanged)
+            {
+                entity.ReceivedJson = "[]";
+            }
+
             entity.Status = TransferStatuses.Downloading;
             entity.UpdatedAt = _time.GetUtcNow();
             await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -425,15 +432,82 @@ public sealed class TransferStore
         return Path.Combine(_options.Dir, transferId + ".bin");
     }
 
-    private static async Task<TransferEntity> RequireAsync(
+    public async Task<int> CleanupExpiredAsync(CancellationToken ct)
+    {
+        await using var db = await _factory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        var now = _time.GetUtcNow();
+        var candidates = await db.Transfers
+            .Where(x => x.Status != TransferStatuses.Expired
+                && x.Status != TransferStatuses.Completed)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        var expired = candidates.Where(x => x.ExpiresAt <= now).ToList();
+        if (expired.Count == 0)
+        {
+            return 0;
+        }
+
+        foreach (var entity in expired)
+        {
+            entity.Status = TransferStatuses.Expired;
+            entity.UpdatedAt = now;
+            entity.Error = "transfer expired";
+            TryDeleteDataFile(entity.Id);
+            _gates.TryRemove(entity.Id, out _);
+        }
+
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        _logger.LogInformation("Expired {Count} transfers.", expired.Count);
+        return expired.Count;
+    }
+
+    private async Task<TransferEntity> RequireAsync(
         AcDbContext db,
         string transferId,
-        CancellationToken ct) =>
-        await db.Transfers.SingleOrDefaultAsync(x => x.Id == transferId, ct).ConfigureAwait(false)
-        ?? throw new TransferException(
-            StatusCodes.Status404NotFound,
-            AcErrorCodes.InvalidPayload,
-            $"Transfer '{transferId}' was not found.");
+        CancellationToken ct)
+    {
+        var entity = await db.Transfers.SingleOrDefaultAsync(x => x.Id == transferId, ct).ConfigureAwait(false)
+            ?? throw new TransferException(
+                StatusCodes.Status404NotFound,
+                AcErrorCodes.InvalidPayload,
+                $"Transfer '{transferId}' was not found.");
+
+        if (entity.ExpiresAt <= _time.GetUtcNow() && entity.Status != TransferStatuses.Completed)
+        {
+            entity.Status = TransferStatuses.Expired;
+            entity.UpdatedAt = _time.GetUtcNow();
+            entity.Error = "transfer expired";
+            TryDeleteDataFile(entity.Id);
+            _gates.TryRemove(entity.Id, out _);
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            throw new TransferException(
+                StatusCodes.Status410Gone,
+                AcErrorCodes.TransferExpired,
+                $"Transfer '{transferId}' has expired.");
+        }
+
+        return entity;
+    }
+
+    private void TryDeleteDataFile(string transferId)
+    {
+        try
+        {
+            var path = DataPath(transferId);
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch (IOException ex)
+        {
+            _logger.LogWarning(ex, "Failed to delete expired transfer {TransferId}.", transferId);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogWarning(ex, "Failed to delete expired transfer {TransferId}.", transferId);
+        }
+    }
 
     private static TransferStatusView ToView(TransferEntity entity) =>
         new(
@@ -473,6 +547,18 @@ public sealed class TransferStore
 
     private static int ChunkCount(long size, int chunkSize) =>
         size == 0 ? 0 : (int)((size + chunkSize - 1) / chunkSize);
+
+    private static string DownloadFileName(string relPath, bool asZip)
+    {
+        var name = Path.GetFileName(relPath.TrimEnd('/', '\\'));
+        if (!asZip)
+        {
+            return name;
+        }
+
+        return (string.IsNullOrWhiteSpace(name) ? "download" : name)
+            + (name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) ? string.Empty : ".zip");
+    }
 
     private static string Combine(string relDir, string fileName) =>
         string.IsNullOrWhiteSpace(relDir) ? fileName : relDir.TrimEnd('/') + "/" + fileName;

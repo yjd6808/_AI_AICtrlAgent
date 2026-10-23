@@ -120,6 +120,92 @@ public sealed class RequestPipelineTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Files_list_proxy_returns_entries_from_agent()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        _agent.Responder = packet => Task.FromResult<ResponsePacket?>(Response(
+            packet,
+            JsonDocument.Parse(
+                """{"entries":[{"name":"note.txt","relPath":"note.txt","isDir":false,"size":4,"modified":"2026-01-01T00:00:00Z","hidden":false,"denied":false,"isReparsePoint":false}],"nextCursor":null,"hasMore":false}""")
+                .RootElement.Clone()));
+
+        using var response = await _browser.GetAsync(
+            $"/api/v1/machines/{_machineId.Value}/workspaces/ws_test/files?relPath=&limit=50",
+            ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, body);
+        using var parsed = JsonDocument.Parse(body);
+        parsed.RootElement.GetProperty("data").GetProperty("entries").GetArrayLength().ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task File_stat_alias_accepts_path_query()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        string? queriedPath = null;
+        _agent.Responder = packet =>
+        {
+            queriedPath = packet.Payload.GetProperty("path").GetString();
+            return Task.FromResult<ResponsePacket?>(Response(
+                packet,
+                JsonDocument.Parse(
+                    """{"name":"note.txt","relPath":"docs/note.txt","isDir":false,"size":4,"modified":"2026-01-01T00:00:00Z","hidden":false,"denied":false,"isReparsePoint":false,"sha256":null}""")
+                    .RootElement.Clone()));
+        };
+
+        using var response = await _browser.GetAsync(
+            $"/api/v1/machines/{_machineId.Value}/workspaces/ws_test/stat?path=docs/note.txt",
+            ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, body);
+        queriedPath.ShouldBe("docs/note.txt");
+    }
+
+    [Fact]
+    public async Task Workspace_register_dispatches_command_to_agent()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        string? dispatchedType = null;
+        _agent.Responder = packet =>
+        {
+            dispatchedType = packet.Type;
+            return Task.FromResult<ResponsePacket?>(Response(
+                packet,
+                JsonDocument.Parse(
+                    """{"workspaceId":"ws_0123abcd","name":"demo","root":"C:\\Work\\demo","allowUpload":true,"allowDownload":true,"allowMkdir":true,"allowDelete":false,"denyPatterns":[],"linkedSessions":[]}""")
+                    .RootElement.Clone()));
+        };
+
+        using var response = await _browser.PostAsJsonAsync(
+            $"/api/v1/machines/{_machineId.Value}/workspaces",
+            new { path = @"C:\Work\demo" },
+            ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, body);
+        using var parsed = JsonDocument.Parse(body);
+        parsed.RootElement.GetProperty("data").GetProperty("result").GetProperty("workspaceId")
+            .GetString().ShouldBe("ws_0123abcd");
+        dispatchedType.ShouldBe(CommandTypes.WorkspaceRegister);
+    }
+
+    [Fact]
+    public async Task Workspace_register_with_stale_auth_requires_reauth()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var login = await _browser.PostAsync("/test-login?authTime=1", null, ct);
+        login.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+
+        using var response = await _browser.PostAsJsonAsync(
+            $"/api/v1/machines/{_machineId.Value}/workspaces",
+            new { path = @"C:\Work\demo" },
+            ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, body);
+        body.ShouldContain(AcErrorCodes.ReauthRequired);
+        _agent.RequestCount.ShouldBe(0);
+    }
+
+    [Fact]
     public async Task Concurrent_identical_queries_share_one_live_dispatch()
     {
         var ct = TestContext.Current.CancellationToken;
@@ -284,6 +370,63 @@ public sealed class RequestPipelineTests : IAsyncLifetime
         }
 
         throw new TimeoutException("The agent connection was not removed.");
+    }
+
+    [Fact]
+    public async Task Vpn_status_returns_live_agent_state()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        string? dispatchedType = null;
+        _agent.Responder = packet =>
+        {
+            dispatchedType = packet.Type;
+            return Task.FromResult<ResponsePacket?>(Response(
+                packet,
+                JsonDocument.Parse(
+                    """{"cliFound":true,"cliPath":"C:\\bin\\protonvpn.exe","helperAvailable":false,"protonGuiRunning":true,"signedIn":true,"username":"user@example.com","expiresAt":"2027-01-01T00:00:00Z","tunnelUp":true,"server":"JP#1","country":"JP","city":"Tokyo","detail":"Connected","exitIp":"203.0.113.10","statusText":"JP#1 연결됨","busyOperation":null,"busyCommandId":null,"asOf":"2026-01-01T00:00:00Z"}""")
+                    .RootElement.Clone()));
+        };
+
+        using var response = await _browser.GetAsync(
+            $"/api/v1/machines/{_machineId.Value}/vpn/status",
+            ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, body);
+        using var parsed = JsonDocument.Parse(body);
+        parsed.RootElement.GetProperty("meta").GetProperty("source").GetString().ShouldBe(MetaSources.Live);
+        parsed.RootElement.GetProperty("data").GetProperty("signedIn").GetBoolean().ShouldBeTrue();
+        parsed.RootElement.GetProperty("data").GetProperty("server").GetString().ShouldBe("JP#1");
+        dispatchedType.ShouldBe(QueryTypes.VpnStatus);
+    }
+
+    [Fact]
+    public async Task Vpn_connect_dispatches_command_and_returns_snapshot()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        string? dispatchedType = null;
+        string? dispatchedServer = null;
+        _agent.Responder = packet =>
+        {
+            dispatchedType = packet.Type;
+            dispatchedServer = packet.Payload.GetProperty("server").GetString();
+            return Task.FromResult<ResponsePacket?>(Response(
+                packet,
+                JsonDocument.Parse(
+                    """{"connect":{"server":"JP#1","country":"JP","countryName":"Japan","city":"Tokyo","load":12,"exitIp":"203.0.113.10","connectedAt":"2026-01-01T00:00:00Z"},"actionText":"JP#1 연결됨","status":{"cliFound":true,"cliPath":"protonvpn","helperAvailable":false,"protonGuiRunning":true,"signedIn":true,"username":"user@example.com","expiresAt":null,"tunnelUp":true,"server":"JP#1","country":"JP","city":"Tokyo","detail":"Connected","exitIp":"203.0.113.10","statusText":"JP#1 연결됨","busyOperation":null,"busyCommandId":null,"asOf":"2026-01-01T00:00:00Z"},"servers":null}""")
+                    .RootElement.Clone()));
+        };
+
+        using var response = await _browser.PostAsJsonAsync(
+            $"/api/v1/machines/{_machineId.Value}/vpn/connect",
+            new { server = "JP#1" },
+            ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, body);
+        using var parsed = JsonDocument.Parse(body);
+        parsed.RootElement.GetProperty("data").GetProperty("result").GetProperty("actionText")
+            .GetString().ShouldBe("JP#1 연결됨");
+        dispatchedType.ShouldBe(CommandTypes.VpnConnect);
+        dispatchedServer.ShouldBe("JP#1");
     }
 
     private static ResponsePacket Response(RequestPacket packet, JsonElement data) =>

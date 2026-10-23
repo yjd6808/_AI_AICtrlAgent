@@ -4,6 +4,7 @@ using AiCtrl.Client.Link;
 using AiCtrl.Client.Storage;
 using AiCtrl.Client.Systems;
 using AiCtrl.Client.Transfers;
+using AiCtrl.Client.Vpn;
 using AiCtrl.Client.Workspace;
 using AiCtrl.Core.Api;
 using AiCtrl.Core.Commands;
@@ -34,6 +35,10 @@ public sealed class CommandSystem
 
     private readonly ILogger<CommandSystem> _logger;
 
+    private readonly WorkspaceRegistrationStore? _registrations;
+
+    private readonly VpnSystem? _vpn;
+
     private readonly ConcurrentDictionary<string, Task<CommandResult>> _inFlight = new(StringComparer.Ordinal);
 
     public CommandSystem(
@@ -44,7 +49,9 @@ public sealed class CommandSystem
         FilesSystem files,
         TransferSystem transfers,
         TimeProvider time,
-        ILogger<CommandSystem> logger)
+        ILogger<CommandSystem> logger,
+        WorkspaceRegistrationStore? registrations = null,
+        VpnSystem? vpn = null)
     {
         ArgumentNullException.ThrowIfNull(journal);
         ArgumentNullException.ThrowIfNull(actors);
@@ -62,14 +69,23 @@ public sealed class CommandSystem
         _transfers = transfers;
         _time = time;
         _logger = logger;
+        _registrations = registrations;
+        _vpn = vpn;
     }
 
     public Task<CommandResult> ExecuteAsync(CommandEnvelope envelope, CancellationToken ct) =>
         ExecuteAsync(envelope, onAcknowledged: null, ct);
 
+    public Task<CommandResult> ExecuteAsync(
+        CommandEnvelope envelope,
+        Func<CancellationToken, Task>? onAcknowledged,
+        CancellationToken ct) =>
+        ExecuteAsync(envelope, onAcknowledged, onProgress: null, ct);
+
     public async Task<CommandResult> ExecuteAsync(
         CommandEnvelope envelope,
         Func<CancellationToken, Task>? onAcknowledged,
+        Func<ProgressPacket, Task>? onProgress,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(envelope);
@@ -79,7 +95,7 @@ public sealed class CommandSystem
             var completion = new TaskCompletionSource<CommandResult>(TaskCreationOptions.RunContinuationsAsynchronously);
             if (_inFlight.TryAdd(envelope.CommandId, completion.Task))
             {
-                _ = RunOwnerAsync(envelope, completion, onAcknowledged, ct);
+                _ = RunOwnerAsync(envelope, completion, onAcknowledged, onProgress, ct);
                 return await completion.Task.WaitAsync(ct).ConfigureAwait(false);
             }
 
@@ -116,6 +132,7 @@ public sealed class CommandSystem
         CommandEnvelope envelope,
         TaskCompletionSource<CommandResult> completion,
         Func<CancellationToken, Task>? onAcknowledged,
+        Func<ProgressPacket, Task>? onProgress,
         CancellationToken ct)
     {
         try
@@ -146,7 +163,7 @@ public sealed class CommandSystem
             CommandResult result;
             try
             {
-                result = await DispatchAsync(envelope, ct).ConfigureAwait(false);
+                result = await DispatchAsync(envelope, onProgress, ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -193,8 +210,12 @@ public sealed class CommandSystem
         }
     }
 
-    private async Task<CommandResult> DispatchAsync(CommandEnvelope envelope, CancellationToken ct)
+    private async Task<CommandResult> DispatchAsync(
+        CommandEnvelope envelope,
+        Func<ProgressPacket, Task>? onProgress,
+        CancellationToken ct)
     {
+        var vpnProgress = CreateVpnProgress(envelope, onProgress);
         try
         {
             switch (envelope.Type)
@@ -307,6 +328,40 @@ public sealed class CommandSystem
                     }, ct).ConfigureAwait(false);
                 }
 
+                case CommandTypes.VpnConnect:
+                {
+                    var payload = JsonSerializer.Deserialize(envelope.Payload, AcJsonContext.Default.VpnConnectPayload);
+                    if (payload is null)
+                    {
+                        return CommandResult.Failure(AcErrorCodes.InvalidPayload, "vpn.connect payload is required.");
+                    }
+
+                    if (_vpn is null)
+                    {
+                        return CommandResult.Failure(AcErrorCodes.CapabilityMissing, "VPN is not available.");
+                    }
+
+                    var result = await _vpn
+                        .ConnectAsync(payload, envelope.CommandId, ct, vpnProgress)
+                        .ConfigureAwait(false);
+                    return CommandResult.Success(
+                        JsonSerializer.SerializeToElement(result, AcJsonContext.Default.VpnActionSnapshot));
+                }
+
+                case CommandTypes.VpnDisconnect:
+                {
+                    if (_vpn is null)
+                    {
+                        return CommandResult.Failure(AcErrorCodes.CapabilityMissing, "VPN is not available.");
+                    }
+
+                    var result = await _vpn
+                        .DisconnectAsync(envelope.CommandId, ct)
+                        .ConfigureAwait(false);
+                    return CommandResult.Success(
+                        JsonSerializer.SerializeToElement(result, AcJsonContext.Default.VpnActionSnapshot));
+                }
+
                 case CommandTypes.FilesMkdir:
                 {
                     var payload = JsonSerializer.Deserialize(envelope.Payload, AcJsonContext.Default.FilesMkdirPayload);
@@ -371,6 +426,33 @@ public sealed class CommandSystem
                             AcJsonContext.Default.FileMutationResult));
                 }
 
+                case CommandTypes.WorkspaceRegister:
+                {
+                    var payload = JsonSerializer.Deserialize(
+                        envelope.Payload,
+                        AcJsonContext.Default.WorkspaceRegisterPayload);
+                    if (payload is null || string.IsNullOrWhiteSpace(payload.Path))
+                    {
+                        return CommandResult.Failure(
+                            AcErrorCodes.InvalidPayload,
+                            "workspace.register payload is required.");
+                    }
+
+                    try
+                    {
+                        var entry = _files.Register(payload.Path);
+                        _registrations?.Add(entry);
+                        return CommandResult.Success(
+                            JsonSerializer.SerializeToElement(
+                                _files.GetWorkspaceInfo(entry),
+                                AcJsonContext.Default.WorkspaceInfo));
+                    }
+                    catch (WorkspaceException ex)
+                    {
+                        return CommandResult.Failure(ex.Code, ex.Message);
+                    }
+                }
+
                 case CommandTypes.InstanceRefresh:
                     return CommandResult.Success(null);
 
@@ -396,10 +478,42 @@ public sealed class CommandSystem
         {
             return CommandResult.Failure(ex.Code, ex.Message);
         }
+        catch (VpnException ex)
+        {
+            return CommandResult.Failure(ex.Code, ex.Message);
+        }
         catch (AcApiException ex)
         {
             return CommandResult.Failure(ex.Code, ex.Message);
         }
+    }
+
+    private Func<VpnProgress, Task>? CreateVpnProgress(
+        CommandEnvelope envelope,
+        Func<ProgressPacket, Task>? onProgress)
+    {
+        if (onProgress is null)
+        {
+            return null;
+        }
+
+        return async progress =>
+        {
+            try
+            {
+                await onProgress(
+                    new ProgressPacket(
+                        envelope.CommandId,
+                        progress.Step,
+                        progress.Data,
+                        _time.GetUtcNow()))
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Command {CommandId} progress callback failed.", envelope.CommandId);
+            }
+        };
     }
 
     private IProviderInstance? Resolve(InstanceId instanceId) =>

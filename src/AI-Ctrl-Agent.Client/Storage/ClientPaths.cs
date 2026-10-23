@@ -12,5 +12,7 @@ public static class ClientPaths
 
     public static string SecretsPath => Path.Combine(DataDirectory, "secrets.bin");
 
+    public static string VpnHelperTokenPath => Path.Combine(DataDirectory, "vpn-helper.token");
+
     public static void EnsureDataDirectory() => Directory.CreateDirectory(DataDirectory);
 }

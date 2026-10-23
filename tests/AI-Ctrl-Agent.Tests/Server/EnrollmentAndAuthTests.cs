@@ -162,8 +162,8 @@ public sealed class EnrollmentAndAuthTests : IAsyncLifetime
             new Core.Events.AgentEventEnvelope(1, "test", DateTimeOffset.UtcNow, payload.RootElement.Clone()),
         };
 
-        (await db.ApplyEventsAsync(machineId.Value, events, ct)).ShouldBe(1);
-        (await db.ApplyEventsAsync(machineId.Value, events, ct)).ShouldBe(1);
+        (await db.ApplyEventsAsync(machineId.Value, events, ct)).LastAppliedEventSeq.ShouldBe(1);
+        (await db.ApplyEventsAsync(machineId.Value, events, ct)).LastAppliedEventSeq.ShouldBe(1);
         var machine = await db.GetMachineAsync(machineId.Value, ct);
         machine!.LastAppliedEventSeq.ShouldBe(1);
     }

@@ -6,11 +6,19 @@ import {
   useQueryClient,
 } from '@tanstack/react-query'
 import {
+  completeTransfer,
+  connectVpn,
+  createDownload,
   createEnrollmentCode,
+  createUpload,
+  deleteFile,
+  disconnectVpn,
   fetchAudit,
   fetchCommand,
   fetchCommands,
   fetchFeatures,
+  fetchFilePreview,
+  fetchFiles,
   fetchInstances,
   fetchMachine,
   fetchMachines,
@@ -21,11 +29,18 @@ import {
   fetchServerLogs,
   fetchSession,
   fetchSessions,
+  fetchTransfer,
+  fetchVpnPage,
+  fetchWorkspaces,
   issueAbort,
   issueAbortAndPrompt,
   issuePrompt,
+  mkdir,
+  putTransferChunk,
+  renameFile,
   replyPermission,
   revokeMachine,
+  transferContentUrl,
   apiPaths,
   api,
 } from './client'
@@ -33,9 +48,12 @@ import type {
   AuditFilters,
   CommandFilters,
   CommandStatus,
+  FileSort,
   PromptInput,
   ProviderKind,
   SessionView,
+  UploadConflict,
+  VpnConnectInput,
 } from './types'
 import { ulid } from 'ulid'
 
@@ -62,6 +80,13 @@ export const queryKeys = {
   audit: (filters: AuditFilters) => ['audit', filters] as const,
   serverLogs: ['server-logs'] as const,
   serverLog: (name: string, lines: number) => ['server-log', name, lines] as const,
+  workspaces: (machineId: string) => ['workspaces', machineId] as const,
+  files: (machineId: string, workspaceId: string, path: string, sort: FileSort) =>
+    ['files', machineId, workspaceId, path, sort] as const,
+  filePreview: (machineId: string, workspaceId: string, path: string) =>
+    ['file-preview', machineId, workspaceId, path] as const,
+  vpnPage: (machineId: string, country: string, prevCity: string) =>
+    ['vpn-page', machineId, country, prevCity] as const,
 }
 
 const terminalCommandStatuses: CommandStatus[] = [
@@ -253,13 +278,15 @@ export function useCommandFollow(commandId: string | null) {
     refetchIntervalInBackground: false,
   })
 
+  const status = query.data?.data.status
+
   return {
     command: query.data?.data,
     meta: query.data?.meta,
     error: query.error,
     isLoading: query.isLoading,
-    expired,
-    status: query.data?.data.status,
+    expired: expired && !isTerminalCommandStatus(status),
+    status,
   }
 }
 
@@ -289,6 +316,243 @@ export function useServerLog(name: string | undefined, lines = 500) {
     enabled: Boolean(name),
     refetchInterval: 5_000,
     refetchIntervalInBackground: false,
+  })
+}
+
+export function useWorkspaces(machineId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.workspaces(machineId ?? ''),
+    queryFn: ({ signal }) => fetchWorkspaces(machineId ?? '', signal),
+    enabled: Boolean(machineId),
+    refetchInterval: 20_000,
+    refetchIntervalInBackground: false,
+  })
+}
+
+export function useFiles(
+  machineId: string | undefined,
+  workspaceId: string | undefined,
+  path: string,
+  sort: FileSort,
+) {
+  return useInfiniteQuery({
+    queryKey: queryKeys.files(machineId ?? '', workspaceId ?? '', path, sort),
+    queryFn: ({ pageParam, signal }) =>
+      fetchFiles(machineId ?? '', workspaceId ?? '', path, sort, pageParam, signal),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.data.nextCursor ?? undefined,
+    enabled: Boolean(machineId && workspaceId),
+    refetchInterval: 20_000,
+    refetchIntervalInBackground: false,
+  })
+}
+
+export function useFilePreview(
+  machineId: string | undefined,
+  workspaceId: string | undefined,
+  path: string | undefined,
+) {
+  return useQuery({
+    queryKey: queryKeys.filePreview(machineId ?? '', workspaceId ?? '', path ?? ''),
+    queryFn: ({ signal }) =>
+      fetchFilePreview(machineId ?? '', workspaceId ?? '', path ?? '', signal),
+    enabled: Boolean(machineId && workspaceId && path),
+    staleTime: 15_000,
+  })
+}
+
+function refreshFiles(
+  queryClient: ReturnType<typeof useQueryClient>,
+  machineId: string,
+  workspaceId: string,
+) {
+  const key = ['files', machineId, workspaceId]
+  void queryClient.invalidateQueries({ queryKey: key })
+  window.setTimeout(() => {
+    void queryClient.invalidateQueries({ queryKey: key })
+  }, 1_500)
+}
+
+export function useMkdir(machineId: string, workspaceId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ relPath }: { relPath: string }) =>
+      mkdir(machineId, workspaceId, relPath, ulid()),
+    retry: false,
+    onSettled: () => refreshFiles(queryClient, machineId, workspaceId),
+  })
+}
+
+export function useDeleteFile(machineId: string, workspaceId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ relPath }: { relPath: string }) =>
+      deleteFile(machineId, workspaceId, relPath, ulid()),
+    retry: false,
+    onSettled: () => refreshFiles(queryClient, machineId, workspaceId),
+  })
+}
+
+export function useRenameFile(machineId: string, workspaceId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ relPath, newName }: { relPath: string; newName: string }) =>
+      renameFile(machineId, workspaceId, relPath, newName, ulid()),
+    retry: false,
+    onSettled: () => refreshFiles(queryClient, machineId, workspaceId),
+  })
+}
+
+export type UploadProgress = {
+  fileName: string
+  sentBytes: number
+  totalBytes: number
+  phase: 'uploading' | 'applying' | 'done'
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, ms))
+}
+
+export function useUploadFile(machineId: string, workspaceId: string) {
+  const queryClient = useQueryClient()
+  const [progress, setProgress] = useState<UploadProgress | null>(null)
+  const mutation = useMutation({
+    mutationFn: async ({
+      file,
+      relDir,
+      conflict,
+    }: {
+      file: File
+      relDir: string
+      conflict: UploadConflict
+    }) => {
+      setProgress({
+        fileName: file.name,
+        sentBytes: 0,
+        totalBytes: file.size,
+        phase: 'uploading',
+      })
+      const created = await createUpload(machineId, workspaceId, {
+        relDir,
+        fileName: file.name,
+        size: file.size,
+        conflict,
+      })
+      const chunksTotal = file.size === 0 ? 0 : Math.ceil(file.size / created.chunkSize)
+      let sent = 0
+      for (let index = 0; index < chunksTotal; index += 1) {
+        const start = index * created.chunkSize
+        const chunk = file.slice(start, Math.min(start + created.chunkSize, file.size))
+        await putTransferChunk(machineId, created.transferId, index, chunk)
+        sent = Math.min(file.size, start + chunk.size)
+        setProgress({
+          fileName: file.name,
+          sentBytes: sent,
+          totalBytes: file.size,
+          phase: 'uploading',
+        })
+      }
+      setProgress({
+        fileName: file.name,
+        sentBytes: file.size,
+        totalBytes: file.size,
+        phase: 'applying',
+      })
+      let status = await completeTransfer(machineId, created.transferId)
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        if (status.status === 'completed' || status.status === 'failed' || status.status === 'expired') {
+          break
+        }
+        await sleep(500)
+        status = await fetchTransfer(machineId, created.transferId)
+      }
+      if (status.status === 'failed' || status.status === 'expired') {
+        throw new Error(status.error ?? '머신이 업로드를 적용하지 못했습니다.')
+      }
+      setProgress({
+        fileName: file.name,
+        sentBytes: file.size,
+        totalBytes: file.size,
+        phase: 'done',
+      })
+      return created.transferId
+    },
+    retry: false,
+    onSettled: () => refreshFiles(queryClient, machineId, workspaceId),
+  })
+  return { ...mutation, progress, clearProgress: () => setProgress(null) }
+}
+
+export function useDownloadFile(machineId: string, workspaceId: string) {
+  const [preparing, setPreparing] = useState<string | null>(null)
+  const mutation = useMutation({
+    mutationFn: async ({ relPath, asZip }: { relPath: string; asZip: boolean }) => {
+      setPreparing(relPath)
+      const created = await createDownload(machineId, workspaceId, relPath, asZip)
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        const status = await fetchTransfer(machineId, created.transferId)
+        if (status.status === 'ready') {
+          return {
+            url: transferContentUrl(machineId, created.transferId),
+            fileName: relPath.split('/').filter(Boolean).pop() ?? 'download',
+          }
+        }
+        if (status.status === 'failed' || status.status === 'expired') {
+          throw new Error(status.error ?? '머신이 다운로드를 준비하지 못했습니다.')
+        }
+        await sleep(500)
+      }
+      throw new Error('다운로드 준비 시간이 초과되었습니다.')
+    },
+    retry: false,
+    onSettled: () => setPreparing(null),
+  })
+  return { ...mutation, preparing }
+}
+
+export function useVpnPage(
+  machineId: string | undefined,
+  country: string | undefined,
+  prevCity: string | undefined,
+) {
+  return useQuery({
+    queryKey: queryKeys.vpnPage(machineId ?? '', country ?? '', prevCity ?? ''),
+    queryFn: ({ signal }) => fetchVpnPage(machineId ?? '', country, prevCity, signal),
+    enabled: Boolean(machineId),
+    refetchInterval: (query) => {
+      const status = query.state.data?.data.status
+      return status?.busyOperation || status?.busyCommandId ? 2_500 : 30_000
+    },
+    refetchIntervalInBackground: false,
+  })
+}
+
+export function useVpnConnect(machineId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: VpnConnectInput) => connectVpn(machineId, input, ulid()),
+    retry: false,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['vpn-page', machineId] }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.machine(machineId) }),
+      ])
+    },
+  })
+}
+
+export function useVpnDisconnect(machineId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => disconnectVpn(machineId, ulid()),
+    retry: false,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['vpn-page', machineId] }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.machine(machineId) }),
+      ])
+    },
   })
 }
 

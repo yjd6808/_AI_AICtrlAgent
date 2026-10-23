@@ -39,6 +39,7 @@ public static class ServerSetup
 
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton(secrets);
+        services.AddSingleton(authOptions);
         services.AddSingleton(dbOptions);
         services.AddDbContextFactory<AcDbContext>(options => options.UseSqlite(dbOptions.ConnectionString));
         services.AddSingleton<ServerDb>();
@@ -62,6 +63,7 @@ public static class ServerSetup
                 "transfers"),
         });
         services.AddSingleton<TransferStore>();
+        services.AddHostedService<TransferSweeper>();
         services.AddSingleton(streamOptions ?? new StreamOptions());
         services.AddSingleton<SessionWatchRegistry>();
         services.AddSingleton<SessionWatchCoordinator>();

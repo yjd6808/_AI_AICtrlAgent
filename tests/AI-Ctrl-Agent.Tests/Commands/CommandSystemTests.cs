@@ -137,7 +137,7 @@ public sealed class CommandSystemTests : IAsyncLifetime
         var envelope = new CommandEnvelope(
             "cmd_unsupported",
             new MachineId("m_test"),
-            "vpn.connect",
+            "future.command",
             JsonSerializer.SerializeToElement(new { }),
             "local",
             DateTimeOffset.UnixEpoch,
@@ -152,6 +152,28 @@ public sealed class CommandSystemTests : IAsyncLifetime
         var view = await _commands.GetViewAsync("cmd_unsupported", ct);
         view.ShouldNotBeNull();
         view.Status.ShouldBe(CommandStatus.Failed);
+    }
+
+    [Fact]
+    public async Task Vpn_command_reports_capability_missing_when_vpn_is_not_registered()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var envelope = new CommandEnvelope(
+            "cmd_vpn_missing",
+            new MachineId("m_test"),
+            CommandTypes.VpnConnect,
+            JsonSerializer.SerializeToElement(
+                new VpnConnectPayload("JP#1", null, null),
+                AcJsonContext.Default.VpnConnectPayload),
+            "local",
+            DateTimeOffset.UnixEpoch,
+            DateTimeOffset.UnixEpoch.AddMinutes(5),
+            0);
+
+        var result = await _commands.ExecuteAsync(envelope, ct);
+
+        result.Status.ShouldBe(CommandStatus.Failed);
+        result.ErrorCode.ShouldBe(AcErrorCodes.CapabilityMissing);
     }
 
     private static CommandEnvelope PromptEnvelope(string commandId) =>

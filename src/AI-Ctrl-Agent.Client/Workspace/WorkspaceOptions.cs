@@ -48,6 +48,40 @@ public sealed record WorkspaceOptions(
                 ReadList(section.GetSection("denyPatterns"))));
         }
 
+        foreach (var section in configuration.GetSection("registeredWorkspaces").GetChildren())
+        {
+            var rootValue = section["root"];
+            if (string.IsNullOrWhiteSpace(rootValue))
+            {
+                continue;
+            }
+
+            string root;
+            try
+            {
+                root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootValue));
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                continue;
+            }
+
+            if (!roots.Add(root))
+            {
+                continue;
+            }
+
+            var name = section["name"];
+            workspaces.Add(new WorkspaceDefinition(
+                string.IsNullOrWhiteSpace(name) ? Path.GetFileName(root) : name,
+                root,
+                ReadBool(section, "allowUpload", true),
+                ReadBool(section, "allowDownload", true),
+                ReadBool(section, "allowMkdir", true),
+                ReadBool(section, "allowDelete", false),
+                ReadList(section.GetSection("denyPatterns"))));
+        }
+
         return new WorkspaceOptions(workspaces, ReadList(configuration.GetSection("workspaceParents")));
     }
 

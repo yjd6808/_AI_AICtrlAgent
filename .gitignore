@@ -24,6 +24,12 @@ dist-ssr/
 .vite/
 *.local
 
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+playwright/.auth/
+
 logs/
 *.log
 

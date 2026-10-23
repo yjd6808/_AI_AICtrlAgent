@@ -37,6 +37,8 @@ public sealed class ServerLinkSystem : IAcSystem
 
     private readonly ILogger<ServerLinkSystem> _logger;
 
+    private readonly ServerLinkPresence? _presence;
+
     private readonly CancellationTokenSource _cts = new();
 
     private Task? _loop;
@@ -66,7 +68,8 @@ public sealed class ServerLinkSystem : IAcSystem
         ServerLinkOptions options,
         INetworkChangeSignal network,
         TimeProvider time,
-        ILogger<ServerLinkSystem> logger)
+        ILogger<ServerLinkSystem> logger,
+        ServerLinkPresence? presence = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(deviceKeys);
@@ -90,6 +93,7 @@ public sealed class ServerLinkSystem : IAcSystem
         _network = network;
         _time = time;
         _logger = logger;
+        _presence = presence;
     }
 
     public string Name => "server-link";
@@ -150,6 +154,7 @@ public sealed class ServerLinkSystem : IAcSystem
             }
         }
 
+        _presence?.Set(false);
         _transfers.Set(null, null);
         _api?.Dispose();
         _cts.Dispose();
@@ -252,6 +257,7 @@ public sealed class ServerLinkSystem : IAcSystem
                 ack.SnapshotRequired,
                 ack.ObservedCountry ?? "unknown");
             Interlocked.Increment(ref _connected);
+            _presence?.Set(true);
 
             await FlushOutboxAsync(connection, machineId, ct).ConfigureAwait(false);
             await _requests
@@ -270,6 +276,7 @@ public sealed class ServerLinkSystem : IAcSystem
                 _push.Detach(push);
             }
 
+            _presence?.Set(false);
             _streams.ClearWatches();
             await connection.StopAsync(CancellationToken.None).ConfigureAwait(false);
         }
@@ -325,7 +332,8 @@ public sealed class ServerLinkSystem : IAcSystem
                 .HandleAsync(
                     packet,
                     acknowledge => connection.InvokeAsync("Ack", acknowledge, ct),
-                    ct)
+                    ct,
+                    progress => connection.InvokeAsync("Progress", progress, ct))
                 .ConfigureAwait(false);
             await connection.InvokeAsync("Respond", response, ct).ConfigureAwait(false);
             await _requests.MarkReportedAsync(packet.RequestId, ct).ConfigureAwait(false);

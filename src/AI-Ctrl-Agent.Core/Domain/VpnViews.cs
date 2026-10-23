@@ -17,7 +17,8 @@ public sealed record VpnStatusView(
     string StatusText,
     string? BusyOperation,
     string? BusyCommandId,
-    DateTimeOffset AsOf);
+    DateTimeOffset AsOf,
+    bool UsesProtonApp = false);
 
 public sealed record VpnCountryView(
     string Code,
@@ -64,3 +65,18 @@ public sealed record VpnServerPage(
     IReadOnlyList<VpnCityGroup> Cities,
     string? SuggestedCity,
     DateTimeOffset AsOf);
+
+public sealed record VpnConnectInfo(
+    string Server,
+    string? Country,
+    string? CountryName,
+    string? City,
+    int Load,
+    string? ExitIp,
+    DateTimeOffset? ConnectedAt);
+
+public sealed record VpnActionSnapshot(
+    VpnConnectInfo? Connect,
+    string ActionText,
+    VpnStatusView Status,
+    VpnServerPage? Servers);

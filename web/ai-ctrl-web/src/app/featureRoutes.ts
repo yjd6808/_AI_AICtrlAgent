@@ -115,9 +115,9 @@ export function buildSidebarSections(
       key: 'files',
       title: '파일',
       href: `/m/${encodeURIComponent(machineId)}/files`,
-      available: false,
-      badge: '준비 중',
-      unavailableReason: '파일 API가 아직 서버에 없습니다.',
+      available: true,
+      badge: null,
+      unavailableReason: null,
     },
   ]
 
@@ -126,9 +126,9 @@ export function buildSidebarSections(
       key: 'vpn.protonvpn',
       title: 'ProtonVPN',
       href: `/m/${encodeURIComponent(machineId)}/vpn`,
-      available: false,
-      badge: '준비 중',
-      unavailableReason: 'VPN API가 아직 서버에 없습니다.',
+      available: true,
+      badge: null,
+      unavailableReason: null,
     },
     {
       key: 'logs',

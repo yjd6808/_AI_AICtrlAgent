@@ -42,6 +42,20 @@ public static class AuthenticationSetup
             o.ExpireTimeSpan = TimeSpan.FromHours(12);
             o.SlidingExpiration = true;
             o.LoginPath = "/api/v1/auth/login";
+            o.Events.OnRedirectToLogin = context =>
+                RedirectOrProblemAsync(
+                    context,
+                    StatusCodes.Status401Unauthorized,
+                    "Unauthorized",
+                    AcErrorCodes.Unauthorized,
+                    "Authentication is required.");
+            o.Events.OnRedirectToAccessDenied = context =>
+                RedirectOrProblemAsync(
+                    context,
+                    StatusCodes.Status403Forbidden,
+                    "Forbidden",
+                    AcErrorCodes.Forbidden,
+                    "Access is denied.");
         });
 
         var clientSecret = secrets.Get(GoogleSecretName);
@@ -105,5 +119,25 @@ public static class AuthenticationSetup
         });
 
         return services;
+    }
+
+    private static Task RedirectOrProblemAsync(
+        RedirectContext<CookieAuthenticationOptions> context,
+        int status,
+        string title,
+        string code,
+        string detail)
+    {
+        if (!context.Request.Path.StartsWithSegments("/api"))
+        {
+            context.Response.Redirect(context.RedirectUri);
+            return Task.CompletedTask;
+        }
+
+        return Results.Json(
+            new AcProblemDetails("about:blank", title, status, detail, context.Request.Path, code),
+            AcJsonContext.Default.AcProblemDetails,
+            statusCode: status,
+            contentType: "application/problem+json").ExecuteAsync(context.HttpContext);
     }
 }

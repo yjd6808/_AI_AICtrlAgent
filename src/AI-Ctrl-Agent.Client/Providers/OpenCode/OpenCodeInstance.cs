@@ -181,13 +181,17 @@ public sealed class OpenCodeInstance : IProviderInstance
             body["agent"] = req.Agent;
         }
 
-        if (!string.IsNullOrEmpty(req.ClientMessageId))
+        var messageId = string.IsNullOrEmpty(req.ClientMessageId)
+            ? string.Empty
+            : NormalizeMessageId(req.ClientMessageId);
+
+        if (messageId.Length > 0)
         {
-            body["messageID"] = req.ClientMessageId;
+            body["messageID"] = messageId;
         }
 
         await _api.PostJsonAsync(_routes.PromptAsync(sessionId), body, ct).ConfigureAwait(false);
-        return new PromptAccepted(req.ClientMessageId ?? string.Empty, _time.GetUtcNow());
+        return new PromptAccepted(messageId, _time.GetUtcNow());
     }
 
     public async ValueTask ReplyPermissionAsync(string sessionId, string permissionId, PermissionReply reply, CancellationToken ct)
@@ -228,6 +232,9 @@ public sealed class OpenCodeInstance : IProviderInstance
         _sseClient.Dispose();
         return ValueTask.CompletedTask;
     }
+
+    private static string NormalizeMessageId(string messageId) =>
+        messageId.StartsWith("msg", StringComparison.Ordinal) ? messageId : "msg_" + messageId;
 
     private static readonly Dictionary<string, object?> EmptyBody = new(StringComparer.Ordinal);
 

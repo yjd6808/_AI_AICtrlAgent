@@ -23,6 +23,9 @@ public static class WorkspaceEndpoints
         app.MapGet("/api/v1/machines/{machineId}/workspaces", ListWorkspacesAsync)
             .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
 
+        app.MapPost("/api/v1/machines/{machineId}/workspaces", RegisterWorkspaceAsync)
+            .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
+
         app.MapGet("/api/v1/machines/{machineId}/workspaces/{workspaceId}/files", ListFilesAsync)
             .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
 
@@ -41,10 +44,31 @@ public static class WorkspaceEndpoints
         app.MapPost("/api/v1/machines/{machineId}/workspaces/{workspaceId}/files/rename", RenameAsync)
             .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
 
+        app.MapGet("/api/v1/machines/{machineId}/workspaces/{workspaceId}/stat", StatFileAsync)
+            .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
+
+        app.MapGet("/api/v1/machines/{machineId}/workspaces/{workspaceId}/preview", PreviewFileAsync)
+            .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
+
+        app.MapPost("/api/v1/machines/{machineId}/workspaces/{workspaceId}/mkdir", MkdirAsync)
+            .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
+
+        app.MapPost("/api/v1/machines/{machineId}/workspaces/{workspaceId}/delete", DeleteAsync)
+            .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
+
+        app.MapPost("/api/v1/machines/{machineId}/workspaces/{workspaceId}/rename", RenameAsync)
+            .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
+
         app.MapPost("/api/v1/machines/{machineId}/workspaces/{workspaceId}/transfers/uploads", CreateUploadAsync)
             .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
 
         app.MapPost("/api/v1/machines/{machineId}/workspaces/{workspaceId}/transfers/downloads", CreateDownloadAsync)
+            .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
+
+        app.MapPost("/api/v1/machines/{machineId}/workspaces/{workspaceId}/uploads", CreateUploadAsync)
+            .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
+
+        app.MapPost("/api/v1/machines/{machineId}/workspaces/{workspaceId}/downloads", CreateDownloadAsync)
             .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
 
         app.MapGet("/api/v1/machines/{machineId}/transfers/{transferId}", GetTransferAsync)
@@ -60,6 +84,21 @@ public static class WorkspaceEndpoints
             .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
 
         app.MapGet("/api/v1/machines/{machineId}/transfers/{transferId}/content", GetContentAsync)
+            .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
+
+        app.MapGet("/api/v1/transfers/{transferId}", GetTransferByIdAsync)
+            .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
+
+        app.MapPut("/api/v1/transfers/{transferId}/chunks/{index}", PutChunkByIdAsync)
+            .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
+
+        app.MapPost("/api/v1/transfers/{transferId}/complete", CompleteTransferByIdAsync)
+            .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
+
+        app.MapPost("/api/v1/transfers/{transferId}/dispatch", DispatchTransferByIdAsync)
+            .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
+
+        app.MapGet("/api/v1/transfers/{transferId}/content", GetContentByIdAsync)
             .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
 
         app.MapPost("/api/v1/agent/transfers/{transferId}/begin", AgentBeginAsync)
@@ -92,6 +131,37 @@ public static class WorkspaceEndpoints
             .ConfigureAwait(false);
     }
 
+    private static async Task<IResult> RegisterWorkspaceAsync(
+        HttpContext context,
+        string machineId,
+        AuthOptions authOptions,
+        CommandExecutionService commands,
+        TimeProvider time,
+        CancellationToken ct)
+    {
+        if (!StepUpSatisfied(context, authOptions, time))
+        {
+            return Problem(
+                context,
+                StatusCodes.Status401Unauthorized,
+                AcErrorCodes.ReauthRequired,
+                "Re-authentication is required to register a workspace.");
+        }
+
+        var body = await ReadBodyAsync(context, AcJsonContext.Default.WorkspaceRegisterRequest, ct)
+            .ConfigureAwait(false);
+        if (body is null || string.IsNullOrWhiteSpace(body.Path))
+        {
+            return Problem(context, StatusCodes.Status400BadRequest, AcErrorCodes.InvalidPayload, "path is required.");
+        }
+
+        var payload = JsonSerializer.SerializeToElement(
+            new WorkspaceRegisterPayload(body.Path),
+            AcJsonContext.Default.WorkspaceRegisterPayload);
+        return await IssueAsync(context, machineId, CommandTypes.WorkspaceRegister, payload, commands, ct)
+            .ConfigureAwait(false);
+    }
+
     private static async Task<IResult> ListFilesAsync(
         HttpContext context,
         string machineId,
@@ -103,7 +173,7 @@ public static class WorkspaceEndpoints
         var payload = JsonSerializer.SerializeToElement(
             new FileListQuery(
                 workspaceId,
-                query["relPath"].FirstOrDefault() ?? string.Empty,
+                QueryPath(context),
                 query["sort"].FirstOrDefault() ?? FileSorts.Name,
                 query["cursor"].FirstOrDefault(),
                 ParseInt(query["limit"], 200)),
@@ -119,7 +189,7 @@ public static class WorkspaceEndpoints
         RemoteQueryService queries,
         CancellationToken ct)
     {
-        var relPath = context.Request.Query["relPath"].FirstOrDefault() ?? string.Empty;
+        var relPath = QueryPath(context);
         var payload = JsonSerializer.SerializeToElement(
             new FileStatQuery(workspaceId, relPath, context.Request.Query["hash"].FirstOrDefault() is "1" or "true"),
             AcJsonContext.Default.FileStatQuery);
@@ -134,7 +204,7 @@ public static class WorkspaceEndpoints
         RemoteQueryService queries,
         CancellationToken ct)
     {
-        var relPath = context.Request.Query["relPath"].FirstOrDefault() ?? string.Empty;
+        var relPath = QueryPath(context);
         var payload = JsonSerializer.SerializeToElement(
             new FilePreviewQuery(workspaceId, relPath),
             AcJsonContext.Default.FilePreviewQuery);
@@ -469,6 +539,117 @@ public static class WorkspaceEndpoints
                 "application/octet-stream",
                 entity.FileName,
                 enableRangeProcessing: true);
+        }
+        catch (TransferException ex)
+        {
+            return Problem(context, ex.StatusCode, ex.Code, ex.Message);
+        }
+    }
+
+    private static async Task<IResult> GetTransferByIdAsync(
+        HttpContext context,
+        string transferId,
+        TransferStore transfers,
+        TimeProvider time,
+        CancellationToken ct)
+    {
+        try
+        {
+            var entity = await transfers.RequireAsync(transferId, ct).ConfigureAwait(false);
+            return await GetTransferAsync(context, entity.MachineId, transferId, transfers, time, ct)
+                .ConfigureAwait(false);
+        }
+        catch (TransferException ex)
+        {
+            return Problem(context, ex.StatusCode, ex.Code, ex.Message);
+        }
+    }
+
+    private static async Task<IResult> PutChunkByIdAsync(
+        HttpContext context,
+        string transferId,
+        int index,
+        TransferStore transfers,
+        TimeProvider time,
+        CancellationToken ct)
+    {
+        try
+        {
+            var entity = await transfers.RequireAsync(transferId, ct).ConfigureAwait(false);
+            return await PutChunkAsync(context, entity.MachineId, transferId, index, transfers, time, ct)
+                .ConfigureAwait(false);
+        }
+        catch (TransferException ex)
+        {
+            return Problem(context, ex.StatusCode, ex.Code, ex.Message);
+        }
+    }
+
+    private static async Task<IResult> CompleteTransferByIdAsync(
+        HttpContext context,
+        string transferId,
+        TransferStore transfers,
+        CommandExecutionService commands,
+        TimeProvider time,
+        CancellationToken ct)
+    {
+        try
+        {
+            var entity = await transfers.RequireAsync(transferId, ct).ConfigureAwait(false);
+            return await CompleteTransferAsync(
+                    context,
+                    entity.MachineId,
+                    transferId,
+                    transfers,
+                    commands,
+                    time,
+                    ct)
+                .ConfigureAwait(false);
+        }
+        catch (TransferException ex)
+        {
+            return Problem(context, ex.StatusCode, ex.Code, ex.Message);
+        }
+    }
+
+    private static async Task<IResult> DispatchTransferByIdAsync(
+        HttpContext context,
+        string transferId,
+        TransferStore transfers,
+        CommandExecutionService commands,
+        TimeProvider time,
+        CancellationToken ct)
+    {
+        try
+        {
+            var entity = await transfers.RequireAsync(transferId, ct).ConfigureAwait(false);
+            return await DispatchTransferAsync(
+                    context,
+                    entity.MachineId,
+                    transferId,
+                    transfers,
+                    commands,
+                    time,
+                    ct)
+                .ConfigureAwait(false);
+        }
+        catch (TransferException ex)
+        {
+            return Problem(context, ex.StatusCode, ex.Code, ex.Message);
+        }
+    }
+
+    private static async Task<IResult> GetContentByIdAsync(
+        HttpContext context,
+        string transferId,
+        TransferStore transfers,
+        CancellationToken ct)
+    {
+        try
+        {
+            var entity = await transfers.RequireAsync(transferId, ct).ConfigureAwait(false);
+            return await GetContentAsync(context, entity.MachineId, transferId, transfers, ct)
+                .ConfigureAwait(false);
         }
         catch (TransferException ex)
         {
@@ -907,6 +1088,18 @@ public static class WorkspaceEndpoints
         return await JsonSerializer.DeserializeAsync(context.Request.Body, typeInfo, ct).ConfigureAwait(false);
     }
 
+    private static bool StepUpSatisfied(HttpContext context, AuthOptions options, TimeProvider time)
+    {
+        var value = context.User.FindFirstValue("auth_time");
+        if (!long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var seconds))
+        {
+            return false;
+        }
+
+        var age = time.GetUtcNow() - DateTimeOffset.FromUnixTimeSeconds(seconds);
+        return age >= TimeSpan.Zero && age <= TimeSpan.FromMinutes(options.StepUpMinutes);
+    }
+
     private static string MachineId(HttpContext context) =>
         context.User.FindFirstValue(AgentTokenDefaults.MachineIdClaim) ?? string.Empty;
 
@@ -921,6 +1114,11 @@ public static class WorkspaceEndpoints
         context.Response.Headers["X-Trace-Id"] = traceId;
         return traceId;
     }
+
+    private static string QueryPath(HttpContext context) =>
+        context.Request.Query["relPath"].FirstOrDefault()
+        ?? context.Request.Query["path"].FirstOrDefault()
+        ?? string.Empty;
 
     private static int ParseInt(string? value, int fallback) =>
         int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) && parsed > 0

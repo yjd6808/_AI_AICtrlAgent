@@ -85,6 +85,27 @@ public static class ServerEndpoints
         app.MapGet("/api/v1/machines/{machineId}/features", GetFeaturesAsync)
             .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
 
+        app.MapGet("/api/v1/machines/{machineId}/vpn/page", GetVpnPageAsync)
+            .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
+
+        app.MapGet("/api/v1/machines/{machineId}/vpn", GetVpnStatusAsync)
+            .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
+
+        app.MapGet("/api/v1/machines/{machineId}/vpn/status", GetVpnStatusAsync)
+            .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
+
+        app.MapGet("/api/v1/machines/{machineId}/vpn/countries", GetVpnCountriesAsync)
+            .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
+
+        app.MapGet("/api/v1/machines/{machineId}/vpn/servers", GetVpnServersAsync)
+            .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
+
+        app.MapPost("/api/v1/machines/{machineId}/vpn/connect", ConnectVpnAsync)
+            .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
+
+        app.MapPost("/api/v1/machines/{machineId}/vpn/disconnect", DisconnectVpnAsync)
+            .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
+
         app.MapPost("/api/v1/machines/{machineId}/instances/refresh", RefreshInstancesAsync)
             .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
 
@@ -288,9 +309,15 @@ public static class ServerEndpoints
     {
         var traceId = TraceId(context);
         var machines = await db.GetMachinesAsync(ct).ConfigureAwait(false);
+        var vpnStates = await db
+            .GetVpnStatesAsync(machines.Select(machine => machine.Id).ToArray(), ct)
+            .ConfigureAwait(false);
         var views = machines
             .Where(machine => machine.RevokedAt is null)
-            .Select(machine => ToMachineInfo(machine, connections))
+            .Select(machine => ToMachineInfo(
+                machine,
+                connections,
+                vpnStates.GetValueOrDefault(machine.Id)))
             .ToList();
         return Results.Json(
             new ApiResponse<List<MachineInfo>>(
@@ -315,7 +342,8 @@ public static class ServerEndpoints
             return Problem(context, StatusCodes.Status404NotFound, AcErrorCodes.MachineNotFound, $"Machine '{machineId}' was not found.");
         }
 
-        var view = ToMachineInfo(machine, connections);
+        var vpn = await db.GetVpnStateAsync(machineId, ct).ConfigureAwait(false);
+        var view = ToMachineInfo(machine, connections, vpn);
         return Results.Json(
             new ApiResponse<MachineInfo>(
                 view,
@@ -461,6 +489,77 @@ public static class ServerEndpoints
         RemoteQueryService queries,
         CancellationToken ct) =>
         await QueryAsync(context, machineId, QueryTypes.MachineFeatures, EmptyObject, queries, ct).ConfigureAwait(false);
+
+    private static async Task<IResult> GetVpnPageAsync(
+        HttpContext context,
+        string machineId,
+        RemoteQueryService queries,
+        CancellationToken ct)
+    {
+        var query = new VpnPageQuery(
+            context.Request.Query["country"].FirstOrDefault(),
+            context.Request.Query["prevCity"].FirstOrDefault());
+        var payload = JsonSerializer.SerializeToElement(query, AcJsonContext.Default.VpnPageQuery);
+        return await QueryAsync(context, machineId, QueryTypes.VpnPage, payload, queries, ct).ConfigureAwait(false);
+    }
+
+    private static async Task<IResult> GetVpnStatusAsync(
+        HttpContext context,
+        string machineId,
+        RemoteQueryService queries,
+        CancellationToken ct) =>
+        await QueryAsync(context, machineId, QueryTypes.VpnStatus, EmptyObject, queries, ct).ConfigureAwait(false);
+
+    private static async Task<IResult> GetVpnCountriesAsync(
+        HttpContext context,
+        string machineId,
+        RemoteQueryService queries,
+        CancellationToken ct) =>
+        await QueryAsync(context, machineId, QueryTypes.VpnCountries, EmptyObject, queries, ct).ConfigureAwait(false);
+
+    private static async Task<IResult> GetVpnServersAsync(
+        HttpContext context,
+        string machineId,
+        RemoteQueryService queries,
+        CancellationToken ct)
+    {
+        var country = context.Request.Query["country"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(country))
+        {
+            return Problem(context, StatusCodes.Status400BadRequest, AcErrorCodes.InvalidPayload, "The 'country' query parameter is required.");
+        }
+
+        var refresh = bool.TryParse(context.Request.Query["refresh"], out var parsed) && parsed;
+        var query = new VpnServersQuery(
+            country,
+            context.Request.Query["prevCity"].FirstOrDefault(),
+            refresh);
+        var payload = JsonSerializer.SerializeToElement(query, AcJsonContext.Default.VpnServersQuery);
+        return await QueryAsync(context, machineId, QueryTypes.VpnServers, payload, queries, ct).ConfigureAwait(false);
+    }
+
+    private static async Task<IResult> ConnectVpnAsync(
+        HttpContext context,
+        string machineId,
+        CommandExecutionService commands,
+        CancellationToken ct)
+    {
+        var body = await ReadBodyAsync(context, AcJsonContext.Default.VpnConnectRequest, ct).ConfigureAwait(false)
+            ?? new VpnConnectRequest(null, null, null);
+        var payload = JsonSerializer.SerializeToElement(
+            new VpnConnectPayload(body.Server, body.Country, body.City, body.Force),
+            AcJsonContext.Default.VpnConnectPayload);
+        return await IssueCommandAsync(context, machineId, CommandTypes.VpnConnect, payload, commands, ct)
+            .ConfigureAwait(false);
+    }
+
+    private static async Task<IResult> DisconnectVpnAsync(
+        HttpContext context,
+        string machineId,
+        CommandExecutionService commands,
+        CancellationToken ct) =>
+        await IssueCommandAsync(context, machineId, CommandTypes.VpnDisconnect, EmptyObject, commands, ct)
+            .ConfigureAwait(false);
 
     private static async Task<IResult> RefreshInstancesAsync(
         HttpContext context,
@@ -834,8 +933,11 @@ public static class ServerEndpoints
 
     private static string CacheKey(string type, JsonElement payload) => type + ":" + payload.GetRawText();
 
-    private static MachineInfo ToMachineInfo(MachineEntity machine, ConnectionRegistry connections) =>
-        MachineViewFactory.Create(machine, connections);
+    private static MachineInfo ToMachineInfo(
+        MachineEntity machine,
+        ConnectionRegistry connections,
+        VpnStatusView? vpn = null) =>
+        MachineViewFactory.Create(machine, connections, vpn);
 
     private static string ServerLogDirectory() =>
         Path.GetDirectoryName(AcLog.FilePath) ?? Path.Combine(AppContext.BaseDirectory, "logs");

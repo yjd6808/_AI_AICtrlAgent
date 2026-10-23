@@ -1,8 +1,10 @@
 using System.Text.Json;
 using AiCtrl.Core.Api;
 using AiCtrl.Core.Commands;
+using AiCtrl.Core.Domain;
 using AiCtrl.Core.Events;
 using AiCtrl.Core.Protocol;
+using AiCtrl.Core.Serialization;
 using Microsoft.EntityFrameworkCore;
 
 namespace AiCtrl.Server.Persistence;
@@ -10,6 +12,8 @@ namespace AiCtrl.Server.Persistence;
 public sealed record EnrollmentResult(bool Success, string? ErrorCode, MachineEntity? Machine);
 
 public sealed record HelloRecord(bool Found, bool Revoked, bool SnapshotRequired, long LastAppliedEventSeq);
+
+public sealed record ApplyEventsResult(long LastAppliedEventSeq, IReadOnlyList<VpnStatusView> VpnStates);
 
 public sealed class ServerDb
 {
@@ -95,6 +99,11 @@ public sealed class ServerDb
             );
             CREATE INDEX IF NOT EXISTS ix_transfers_machine_created ON transfers (machine_id, created_at);
             CREATE INDEX IF NOT EXISTS ix_transfers_status ON transfers (status);
+            CREATE TABLE IF NOT EXISTS machine_vpn_state (
+                machine_id TEXT NOT NULL PRIMARY KEY,
+                payload_json TEXT NOT NULL,
+                as_of TEXT NOT NULL
+            );
             """,
             ct).ConfigureAwait(false);
     }
@@ -225,24 +234,103 @@ public sealed class ServerDb
         return new HelloRecord(true, false, snapshotRequired, machine.LastAppliedEventSeq);
     }
 
-    public async Task<long> ApplyEventsAsync(string machineId, IReadOnlyList<AgentEventEnvelope> events, CancellationToken ct)
+    public async Task<ApplyEventsResult> ApplyEventsAsync(
+        string machineId,
+        IReadOnlyList<AgentEventEnvelope> events,
+        CancellationToken ct)
     {
         await using var db = await _factory.CreateDbContextAsync(ct).ConfigureAwait(false);
         var machine = await db.Machines.SingleOrDefaultAsync(x => x.Id == machineId, ct).ConfigureAwait(false);
         if (machine is null)
         {
-            return -1;
+            return new ApplyEventsResult(-1, Array.Empty<VpnStatusView>());
         }
 
-        var maxSeq = events.Count == 0 ? machine.LastAppliedEventSeq : events.Max(x => x.Seq);
-        if (maxSeq > machine.LastAppliedEventSeq)
+        var appliedSeq = machine.LastAppliedEventSeq;
+        var maxSeq = events.Count == 0 ? appliedSeq : events.Max(x => x.Seq);
+        if (maxSeq > appliedSeq)
         {
-            machine.LastAppliedEventSeq = maxSeq;
+            appliedSeq = maxSeq;
         }
 
+        VpnStatusView? vpnState = null;
+        foreach (var envelope in events
+                     .Where(x => x.Seq > machine.LastAppliedEventSeq && x.Type == AgentEventTypes.VpnState)
+                     .OrderBy(x => x.Seq))
+        {
+            VpnStatusView? parsed;
+            try
+            {
+                parsed = JsonSerializer.Deserialize(envelope.Payload, AcJsonContext.Default.VpnStatusView);
+            }
+            catch (JsonException)
+            {
+                continue;
+            }
+
+            if (parsed is null || parsed.AsOf == default)
+            {
+                continue;
+            }
+
+            var entity = await db.MachineVpnStates
+                .SingleOrDefaultAsync(x => x.MachineId == machineId, ct)
+                .ConfigureAwait(false);
+            if (entity is null)
+            {
+                entity = new MachineVpnStateEntity { MachineId = machineId };
+                db.MachineVpnStates.Add(entity);
+            }
+
+            entity.PayloadJson = JsonSerializer.Serialize(parsed, AcJsonContext.Default.VpnStatusView);
+            entity.AsOf = parsed.AsOf;
+            vpnState = parsed;
+        }
+
+        machine.LastAppliedEventSeq = appliedSeq;
         machine.LastSeenAt = _time.GetUtcNow();
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
-        return machine.LastAppliedEventSeq;
+        return new ApplyEventsResult(
+            machine.LastAppliedEventSeq,
+            vpnState is null ? Array.Empty<VpnStatusView>() : new[] { vpnState });
+    }
+
+    public async Task<VpnStatusView?> GetVpnStateAsync(string machineId, CancellationToken ct)
+    {
+        await using var db = await _factory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        var entity = await db.MachineVpnStates
+            .AsNoTracking()
+            .SingleOrDefaultAsync(x => x.MachineId == machineId, ct)
+            .ConfigureAwait(false);
+        return entity is null ? null : ParseVpnState(entity.PayloadJson);
+    }
+
+    public async Task<Dictionary<string, VpnStatusView>> GetVpnStatesAsync(
+        IReadOnlyCollection<string> machineIds,
+        CancellationToken ct)
+    {
+        if (machineIds.Count == 0)
+        {
+            return new Dictionary<string, VpnStatusView>(StringComparer.Ordinal);
+        }
+
+        await using var db = await _factory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        var states = await db.MachineVpnStates
+            .AsNoTracking()
+            .Where(x => machineIds.Contains(x.MachineId))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        var result = new Dictionary<string, VpnStatusView>(StringComparer.Ordinal);
+        foreach (var state in states)
+        {
+            var parsed = ParseVpnState(state.PayloadJson);
+            if (parsed is not null)
+            {
+                result[state.MachineId] = parsed;
+            }
+        }
+
+        return result;
     }
 
     public async Task RevokeMachineAsync(string machineId, CancellationToken ct)
@@ -596,6 +684,18 @@ public sealed class ServerDb
                 x.Result))
             .ToListAsync(ct)
             .ConfigureAwait(false);
+    }
+
+    private static VpnStatusView? ParseVpnState(string json)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize(json, AcJsonContext.Default.VpnStatusView);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private static CommandDetailView ToDetail(CommandEntity command, IReadOnlyList<CommandStepView> steps) =>

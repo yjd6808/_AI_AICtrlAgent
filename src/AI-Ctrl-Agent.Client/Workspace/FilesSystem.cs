@@ -59,6 +59,23 @@ public sealed class FilesSystem
             .ToList();
     }
 
+    public WorkspaceInfo GetWorkspaceInfo(WorkspaceEntry entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        return new WorkspaceInfo(
+            entry.WorkspaceId,
+            entry.Definition.Name,
+            entry.Definition.Root,
+            entry.Definition.AllowUpload,
+            entry.Definition.AllowDownload,
+            entry.Definition.AllowMkdir,
+            entry.Definition.AllowDelete,
+            entry.Definition.DenyPatterns,
+            []);
+    }
+
+    public WorkspaceEntry Register(string path) => _workspaces.Register(path);
+
     public FileListPage List(FileListQuery query)
     {
         ArgumentNullException.ThrowIfNull(query);

@@ -107,6 +107,23 @@ public sealed class FakeOpenCodeServer : IAsyncDisposable
                 var model = ReadModel(root);
                 var text = ExtractText(root);
 
+                if (messageId is not null && !messageId.StartsWith("msg", StringComparison.Ordinal))
+                {
+                    await Results.Json(
+                            new
+                            {
+                                name = "BadRequest",
+                                data = new
+                                {
+                                    message = $"Expected a string starting with \"msg\", got \"{messageId}\"",
+                                    kind = "Payload",
+                                },
+                            },
+                            statusCode: StatusCodes.Status400BadRequest)
+                        .ExecuteAsync(context);
+                    return;
+                }
+
                 if (scenario.PromptAcceptDelay > TimeSpan.Zero)
                 {
                     await Task.Delay(scenario.PromptAcceptDelay, context.RequestAborted);

@@ -3,6 +3,7 @@ import type {
   AuditLogView,
   CommandDetailView,
   CommandStepView,
+  FileEntry,
   InstanceInfo,
   LogFileView,
   MachineFeature,
@@ -12,6 +13,11 @@ import type {
   PartView,
   SessionDisplayState,
   SessionSummary,
+  TransferStatusView,
+  VpnCountryView,
+  VpnServerPage,
+  VpnServerRow,
+  VpnStatusView,
 } from '../api/types'
 
 const minute = 60_000
@@ -240,8 +246,20 @@ export type MockCommand = {
   outcome: 'succeeded' | 'failed' | 'cancelled' | null
   sessionId: string | null
   promptText: string | null
-  mode: 'prompt' | 'abort' | 'abort-and-prompt' | 'refresh' | 'seed'
+  mode: 'prompt' | 'abort' | 'abort-and-prompt' | 'refresh' | 'seed' | 'files' | 'vpn'
   completed: boolean
+}
+
+export type MockWorkspaceFiles = {
+  entries: Record<string, FileEntry[]>
+  texts: Record<string, string>
+  images: Record<string, { mime: string; base64: string }>
+}
+
+export type MockVpnState = {
+  status: VpnStatusView
+  countries: VpnCountryView[]
+  pages: Record<string, VpnServerPage>
 }
 
 export type MockState = {
@@ -256,6 +274,9 @@ export type MockState = {
   audit: AuditLogView[]
   logs: Record<string, { file: LogFileView; content: string }>
   enrollmentCodes: string[]
+  files: Record<string, MockWorkspaceFiles>
+  transfers: Record<string, TransferStatusView>
+  vpn: Record<string, MockVpnState>
 }
 
 function seedCommand(
@@ -300,6 +321,254 @@ function seedCommand(
       ],
     },
   }
+}
+
+function fileEntry(
+  now: number,
+  name: string,
+  relPath: string,
+  isDir: boolean,
+  size: number | null,
+  ago: number,
+  extra: Partial<FileEntry> = {},
+): FileEntry {
+  return {
+    name,
+    relPath,
+    isDir,
+    size,
+    modified: new Date(now - ago).toISOString(),
+    hidden: false,
+    denied: false,
+    isReparsePoint: false,
+    ...extra,
+  }
+}
+
+function seedWorkspaceFiles(now: number): MockWorkspaceFiles {
+  const entries: Record<string, FileEntry[]> = {
+    '': [
+      fileEntry(now, 'docs', 'docs', true, null, 2 * hour),
+      fileEntry(now, 'src', 'src', true, null, hour),
+      fileEntry(now, 'README.md', 'README.md', false, 2_480, 38 * minute),
+      fileEntry(now, 'logo.png', 'logo.png', false, 68, 3 * hour),
+      fileEntry(now, 'package.json', 'package.json', false, 742, 55 * minute),
+      fileEntry(now, '.env', '.env', false, 186, 4 * hour, {
+        hidden: true,
+        denied: true,
+      }),
+    ],
+    docs: [
+      fileEntry(now, 'guide.md', 'docs/guide.md', false, 1_240, 90 * minute),
+      fileEntry(now, 'release-notes.md', 'docs/release-notes.md', false, 860, 6 * hour),
+    ],
+    src: [
+      fileEntry(now, 'components', 'src/components', true, null, 25 * minute),
+      fileEntry(now, 'main.ts', 'src/main.ts', false, 420, 25 * minute),
+    ],
+    'src/components': [
+      fileEntry(now, 'App.tsx', 'src/components/App.tsx', false, 1_980, 25 * minute),
+    ],
+  }
+
+  return {
+    entries,
+    texts: {
+      'README.md': [
+        '# Mabi Tooling',
+        '',
+        '이 워크스페이스는 AI-Ctrl-Agent 파일 API 미리보기용입니다.',
+        '',
+        '## 구성',
+        '',
+        '- `docs/` — 운영 문서',
+        '- `src/` — 예제 소스',
+        '- `logo.png` — 이미지 미리보기 예제',
+        '',
+        '```bash',
+        'dotnet test',
+        'npm run dev',
+        '```',
+      ].join('\n'),
+      'docs/guide.md': [
+        '# 운영 가이드',
+        '',
+        '1. 워크스페이스를 선택합니다.',
+        '2. 폴더를 탐색합니다.',
+        '3. 파일을 미리보거나 내려받습니다.',
+        '',
+        '삭제와 이름 변경은 Client의 `allowDelete` 설정을 따릅니다.',
+      ].join('\n'),
+      'docs/release-notes.md': '# 릴리스 노트\n\n- 파일 탐색 추가\n- 전송 재개 추가\n',
+      'src/main.ts': [
+        "import { createRoot } from 'react-dom/client'",
+        "import { App } from './components/App'",
+        '',
+        "createRoot(document.getElementById('root')!).render(<App />)",
+      ].join('\n'),
+      'src/components/App.tsx': [
+        'export function App() {',
+        "  return <main>AI-Ctrl-Agent workspace preview</main>",
+        '}',
+      ].join('\n'),
+      'package.json': JSON.stringify(
+        { name: 'mabi-tooling', private: true, version: '1.4.0' },
+        null,
+        2,
+      ),
+    },
+    images: {
+      'logo.png': {
+        mime: 'image/png',
+        base64:
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6nZkAAAAASUVORK5CYII=',
+      },
+    },
+  }
+}
+
+function vpnServer(
+  name: string,
+  country: string,
+  countryName: string,
+  city: string,
+  tier: number,
+  tierName: string,
+  load: number,
+  score: number,
+  features: string[],
+  lastConnectedAt: string | null,
+  rowState: VpnServerRow['rowState'],
+): VpnServerRow {
+  return {
+    name,
+    country,
+    countryName,
+    city,
+    tier,
+    tierName,
+    load,
+    score,
+    features,
+    lastConnectedAt,
+    rowState,
+  }
+}
+
+function seedVpn(now: number): MockVpnState {
+  const asOf = new Date(now).toISOString()
+  const pages: Record<string, VpnServerPage> = {
+    JP: {
+      country: 'JP',
+      suggestedCity: 'Tokyo',
+      asOf,
+      cities: [
+        {
+          city: 'Tokyo',
+          count: 3,
+          highlight: true,
+          servers: [
+            vpnServer('JP#1', 'JP', '일본', 'Tokyo', 2, 'Plus', 32, 18.4, ['P2P'], new Date(now - 2 * hour).toISOString(), 'Recent'),
+            vpnServer('JP#2', 'JP', '일본', 'Tokyo', 3, 'Plus', 7, 5.2, [], new Date(now - 45 * minute).toISOString(), 'Connected'),
+            vpnServer('JP#3', 'JP', '일본', 'Tokyo', 0, 'Free', 64, 44.1, [], new Date(now - 26 * hour).toISOString(), 'Past'),
+          ],
+        },
+        {
+          city: 'Osaka',
+          count: 2,
+          highlight: false,
+          servers: [
+            vpnServer('JP#4', 'JP', '일본', 'Osaka', 2, 'Plus', 21, 12, ['P2P'], null, 'Never'),
+            vpnServer('JP#5', 'JP', '일본', 'Osaka', 0, 'Free', 81, 61.2, [], null, 'Never'),
+          ],
+        },
+      ],
+    },
+    DE: {
+      country: 'DE',
+      suggestedCity: 'Frankfurt',
+      asOf,
+      cities: [
+        {
+          city: 'Frankfurt',
+          count: 2,
+          highlight: true,
+          servers: [
+            vpnServer('DE#1', 'DE', '독일', 'Frankfurt', 2, 'Plus', 18, 9.8, ['P2P'], new Date(now - 3 * 24 * hour).toISOString(), 'Past'),
+            vpnServer('DE#2', 'DE', '독일', 'Frankfurt', 0, 'Free', 52, 38.4, [], null, 'Never'),
+          ],
+        },
+      ],
+    },
+    US: {
+      country: 'US',
+      suggestedCity: 'New York',
+      asOf,
+      cities: [
+        {
+          city: 'New York',
+          count: 1,
+          highlight: true,
+          servers: [
+            vpnServer('US#1', 'US', '미국', 'New York', 2, 'Plus', 44, 27.5, ['P2P', 'Streaming'], null, 'Never'),
+          ],
+        },
+        {
+          city: 'Los Angeles',
+          count: 1,
+          highlight: false,
+          servers: [
+            vpnServer('US#2', 'US', '미국', 'Los Angeles', 1, 'Plus', 73, 49.9, ['Streaming'], null, 'Never'),
+          ],
+        },
+      ],
+    },
+    NL: {
+      country: 'NL',
+      suggestedCity: 'Amsterdam',
+      asOf,
+      cities: [
+        {
+          city: 'Amsterdam',
+          count: 1,
+          highlight: true,
+          servers: [
+            vpnServer('NL#1', 'NL', '네덜란드', 'Amsterdam', 2, 'Plus', 12, 6.4, ['P2P'], null, 'Never'),
+          ],
+        },
+      ],
+    },
+  }
+
+  const countries: VpnCountryView[] = [
+    { code: 'JP', name: '일본', count: 5, cities: ['Tokyo', 'Osaka'] },
+    { code: 'DE', name: '독일', count: 2, cities: ['Frankfurt'] },
+    { code: 'US', name: '미국', count: 2, cities: ['New York', 'Los Angeles'] },
+    { code: 'NL', name: '네덜란드', count: 1, cities: ['Amsterdam'] },
+  ]
+
+  const status: VpnStatusView = {
+    cliFound: true,
+    cliPath: 'C:\\Program Files\\Proton\\VPN\\vpn.exe',
+    helperAvailable: true,
+    protonGuiRunning: false,
+    signedIn: true,
+    username: 'jdyun@example.com',
+    expiresAt: new Date(now + 18 * 24 * hour).toISOString(),
+    tunnelUp: true,
+    server: 'JP#2',
+    country: 'JP',
+    city: 'Tokyo',
+    detail: 'JP#2 · Tokyo · 45분 전 연결',
+    exitIp: '203.0.113.8',
+    statusText: '연결됨',
+    busyOperation: null,
+    busyCommandId: null,
+    asOf,
+    usesProtonApp: false,
+  }
+
+  return { status, countries, pages }
 }
 
 export function createMockState(): MockState {
@@ -572,8 +841,8 @@ export function createMockState(): MockState {
       mach_alpha: [
         feature('sessions', 'Agents', 'Sessions', '/sessions'),
         feature('commands', 'Agents', 'Commands', '/commands'),
-        feature('files', 'Workspace', '파일', '/files', false, '파일 API가 아직 없습니다.', '준비 중'),
-        feature('vpn', 'Etc', 'ProtonVPN', '/vpn', false, 'VPN API가 아직 없습니다.', '준비 중'),
+        feature('files', 'Workspace', '파일', '/files'),
+        feature('vpn', 'Etc', 'ProtonVPN', '/vpn'),
         feature('logs', 'Etc', '서버 로그', '/logs'),
         feature(
           'diagnostics',
@@ -617,6 +886,13 @@ export function createMockState(): MockState {
       },
     },
     enrollmentCodes: [],
+    files: {
+      ws_mabi: seedWorkspaceFiles(now),
+    },
+    transfers: {},
+    vpn: {
+      mach_alpha: seedVpn(now),
+    },
   }
 }
 
@@ -727,6 +1003,18 @@ export function advanceCommand(state: MockState, command: MockCommand): void {
           '프롬프트를 받았습니다. 변경 사항과 테스트 결과를 정리하겠습니다.',
         )
         target.messageCount = (target.messageCount ?? 0) + 2
+      }
+    }
+  }
+
+  if (command.mode === 'vpn') {
+    const vpn = state.vpn[command.machineId]
+    if (vpn) {
+      vpn.status = {
+        ...vpn.status,
+        busyOperation: null,
+        busyCommandId: null,
+        asOf: new Date(now).toISOString(),
       }
     }
   }

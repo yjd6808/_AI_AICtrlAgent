@@ -222,6 +222,25 @@ public sealed class OpenCodeProviderTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Prompt_normalizes_command_id_to_message_id()
+    {
+        var session = _server.State.SeedSession("prompting");
+        var instance = await DiscoverSingleAsync(CreateProvider(), TestContext.Current.CancellationToken);
+
+        var accepted = await instance.PromptAsync(
+            session,
+            new PromptRequest("normalized", null, null, "28b6de90ae9c4fda90184161237f7b1e"),
+            TestContext.Current.CancellationToken);
+
+        accepted.MessageId.ShouldBe("msg_28b6de90ae9c4fda90184161237f7b1e");
+
+        var messages = _server.State.GetMessages(session);
+        messages.ShouldContain(message => message.Info.Id == accepted.MessageId);
+
+        await instance.DisposeAsync();
+    }
+
+    [Fact]
     public async Task Prompt_on_unknown_session_throws_not_found()
     {
         var instance = await DiscoverSingleAsync(CreateProvider(), TestContext.Current.CancellationToken);

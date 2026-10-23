@@ -263,3 +263,171 @@ export type SessionView = 'active' | 'all'
 export type AuditFilters = { from?: string; to?: string; limit?: number }
 
 export type CommandFilters = { machineId?: string; status?: CommandStatus; limit?: number }
+
+export type FileSort = 'name' | 'modified' | 'size'
+
+export type FileEntry = {
+  name: string
+  relPath: string
+  isDir: boolean
+  size: number | null
+  modified: Iso
+  hidden: boolean
+  denied: boolean
+  isReparsePoint: boolean
+}
+
+export type FileListPage = {
+  entries: FileEntry[]
+  nextCursor: string | null
+  hasMore: boolean
+}
+
+export type FileStatView = {
+  name: string
+  relPath: string
+  isDir: boolean
+  size: number | null
+  modified: Iso
+  hidden: boolean
+  denied: boolean
+  isReparsePoint: boolean
+  sha256: string | null
+}
+
+export type FileMutationResult = {
+  workspaceId: string
+  relPath: string
+  isDir: boolean
+}
+
+export type FilePreviewKind = 'text' | 'image' | 'binary'
+
+export type FilePreviewView = {
+  name: string
+  relPath: string
+  kind: FilePreviewKind
+  size: number
+  modified: Iso
+  text: string | null
+  base64: string | null
+  truncated: boolean
+}
+
+export type TransferDirection = 'up' | 'down'
+
+export type TransferStatusName =
+  | 'pending'
+  | 'uploading'
+  | 'ready'
+  | 'downloading'
+  | 'completed'
+  | 'failed'
+  | 'expired'
+
+export type UploadConflict = 'fail' | 'overwrite' | 'rename'
+
+export type TransferCreatedView = {
+  transferId: string
+  chunkSize: number
+  expiresAt: Iso
+}
+
+export type TransferStatusView = {
+  transferId: string
+  direction: TransferDirection
+  machineId: string
+  workspaceId: string
+  relPath: string
+  size: number
+  sha256: string | null
+  asZip: boolean
+  conflict: UploadConflict | null
+  chunkSize: number
+  chunksTotal: number
+  receivedChunks: number[]
+  status: TransferStatusName
+  createdAt: Iso
+  expiresAt: Iso
+  error: string | null
+}
+
+export type TransferCommandView = {
+  transferId: string
+  commandId: string
+  status: string
+  pending: boolean
+}
+
+export type VpnRowState = 'Connected' | 'Recent' | 'Past' | 'Never'
+
+export type VpnStatusView = {
+  cliFound: boolean
+  cliPath: string | null
+  helperAvailable: boolean
+  protonGuiRunning: boolean
+  signedIn: boolean
+  username: string | null
+  expiresAt: Iso | null
+  tunnelUp: boolean
+  server: string | null
+  country: string | null
+  city: string | null
+  detail: string | null
+  exitIp: string | null
+  statusText: string
+  busyOperation: string | null
+  busyCommandId: string | null
+  asOf: Iso
+  usesProtonApp?: boolean
+}
+
+export type VpnCountryView = {
+  code: string
+  name: string
+  count: number
+  cities: string[]
+}
+
+export type VpnServerRow = {
+  name: string
+  country: string
+  countryName: string
+  city: string | null
+  tier: number
+  tierName: string
+  load: number
+  score: number
+  features: string[]
+  lastConnectedAt: Iso | null
+  rowState: VpnRowState
+}
+
+export type VpnCityGroup = {
+  city: string
+  count: number
+  highlight: boolean
+  servers: VpnServerRow[]
+}
+
+export type VpnServerPage = {
+  country: string
+  cities: VpnCityGroup[]
+  suggestedCity: string | null
+  asOf: Iso
+}
+
+export type VpnPageSnapshot = {
+  status: VpnStatusView
+  countries: VpnCountryView[]
+  selectedCountry: string
+  servers: VpnServerPage | null
+  actionText: string | null
+}
+
+export type VpnConnectInput = {
+  server?: string
+  country?: string
+  city?: string
+  force?: boolean
+}

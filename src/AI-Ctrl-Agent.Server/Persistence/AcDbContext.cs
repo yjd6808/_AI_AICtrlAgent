@@ -25,6 +25,8 @@ public sealed class AcDbContext : DbContext
 
     public DbSet<QueryCacheEntity> QueryCache => Set<QueryCacheEntity>();
 
+    public DbSet<MachineVpnStateEntity> MachineVpnStates => Set<MachineVpnStateEntity>();
+
     public DbSet<TransferEntity> Transfers => Set<TransferEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -140,6 +142,15 @@ public sealed class AcDbContext : DbContext
             entity.Property(x => x.AsOf).HasColumnName("as_of");
         });
 
+        modelBuilder.Entity<MachineVpnStateEntity>(entity =>
+        {
+            entity.ToTable("machine_vpn_state");
+            entity.HasKey(x => x.MachineId);
+            entity.Property(x => x.MachineId).HasColumnName("machine_id");
+            entity.Property(x => x.PayloadJson).HasColumnName("payload_json").IsRequired();
+            entity.Property(x => x.AsOf).HasColumnName("as_of");
+        });
+
         modelBuilder.Entity<TransferEntity>(entity =>
         {
             entity.ToTable("transfers");
@@ -209,6 +220,15 @@ public sealed class MachineEntity
     public string? ObservedCountry { get; set; }
 
     public string? BootId { get; set; }
+}
+
+public sealed class MachineVpnStateEntity
+{
+    public string MachineId { get; set; } = string.Empty;
+
+    public string PayloadJson { get; set; } = string.Empty;
+
+    public DateTimeOffset AsOf { get; set; }
 }
 
 public sealed class TransferEntity

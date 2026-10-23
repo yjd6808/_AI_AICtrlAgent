@@ -252,6 +252,13 @@ public sealed class TransferSystem : IAcSystem
             }
             else if (File.Exists(source.FullPath))
             {
+                if (payload.AsZip)
+                {
+                    throw new ClientTransferException(
+                        AcErrorCodes.InvalidPayload,
+                        "asZip applies to directory downloads only.");
+                }
+
                 contentPath = source.FullPath;
             }
             else
@@ -282,6 +289,7 @@ public sealed class TransferSystem : IAcSystem
                 ct).ConfigureAwait(false);
 
             var buffer = new byte[status.ChunkSize];
+            var received = status.ReceivedChunks.ToHashSet();
             await using var stream = new FileStream(
                 contentPath,
                 FileMode.Open,
@@ -291,7 +299,13 @@ public sealed class TransferSystem : IAcSystem
                 FileOptions.Asynchronous | FileOptions.SequentialScan);
             for (var index = 0; index < status.ChunksTotal; index++)
             {
+                if (received.Contains(index))
+                {
+                    continue;
+                }
+
                 var expected = (int)Math.Min(status.ChunkSize, size - (index * (long)status.ChunkSize));
+                stream.Position = index * (long)status.ChunkSize;
                 await stream.ReadExactlyAsync(buffer.AsMemory(0, expected), ct).ConfigureAwait(false);
                 await api.PutTransferChunkAsync(payload.TransferId, index, buffer.AsMemory(0, expected), token, ct)
                     .ConfigureAwait(false);

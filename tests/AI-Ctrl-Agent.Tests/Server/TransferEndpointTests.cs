@@ -3,6 +3,11 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using AiCtrl.Core.Protocol;
+using AiCtrl.Server.Persistence;
+using AiCtrl.Server.Transfers;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 
 namespace AiCtrl.Tests.Server;
@@ -31,7 +36,9 @@ public sealed class TransferEndpointTests : IAsyncLifetime
 
     public async ValueTask InitializeAsync()
     {
-        _host = await TestServerHost.StartAsync(_directory);
+        _host = await TestServerHost.StartAsync(
+            _directory,
+            transferOptions: new TransferOptions { Dir = Path.Combine(_directory, "transfers") });
         _browser.BaseAddress = new Uri(_host.BaseUrl);
         using var login = await _browser.PostAsync(
             "/test-login?email=test%40example.com&name=Test+User",
@@ -90,6 +97,49 @@ public sealed class TransferEndpointTests : IAsyncLifetime
         var served = await _browser.GetByteArrayAsync(
             $"/api/v1/machines/ma_test/transfers/{transferId}/content",
             ct);
+        served.ShouldBe(content);
+    }
+
+    [Fact]
+    public async Task Architecture_transfer_aliases_are_supported()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var content = Encoding.UTF8.GetBytes("alias transfer");
+        using var create = await _browser.PostAsJsonAsync(
+            "/api/v1/machines/ma_test/workspaces/ws_test/uploads",
+            new
+            {
+                relDir = "",
+                fileName = "alias.txt",
+                size = content.Length,
+                sha256 = Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant(),
+                conflict = "fail",
+            },
+            ct);
+        var createBody = await create.Content.ReadAsStringAsync(ct);
+        create.StatusCode.ShouldBe(HttpStatusCode.Created, createBody);
+        using var created = JsonDocument.Parse(createBody);
+        var transferId = created.RootElement.GetProperty("data").GetProperty("transferId").GetString();
+
+        using var chunk = new ByteArrayContent(content);
+        using var put = await _browser.PutAsync(
+            $"/api/v1/transfers/{transferId}/chunks/0",
+            chunk,
+            ct);
+        put.StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        using var complete = await _browser.PostAsync(
+            $"/api/v1/transfers/{transferId}/complete",
+            null,
+            ct);
+        complete.StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        using var status = await _browser.GetAsync($"/api/v1/transfers/{transferId}", ct);
+        status.StatusCode.ShouldBe(HttpStatusCode.OK);
+        using var statusBody = JsonDocument.Parse(await status.Content.ReadAsStringAsync(ct));
+        statusBody.RootElement.GetProperty("data").GetProperty("status").GetString().ShouldBe("ready");
+
+        var served = await _browser.GetByteArrayAsync($"/api/v1/transfers/{transferId}/content", ct);
         served.ShouldBe(content);
     }
 
@@ -165,6 +215,68 @@ public sealed class TransferEndpointTests : IAsyncLifetime
             shortChunk,
             ct);
         put.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task Download_zip_uses_zip_file_name()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var create = await _browser.PostAsJsonAsync(
+            "/api/v1/machines/ma_test/workspaces/ws_test/transfers/downloads",
+            new
+            {
+                relPath = "docs",
+                asZip = true,
+            },
+            ct);
+        create.StatusCode.ShouldBe(HttpStatusCode.Created);
+        using var created = JsonDocument.Parse(await create.Content.ReadAsStringAsync(ct));
+        var transferId = created.RootElement.GetProperty("data").GetProperty("transferId").GetString();
+
+        var factory = _host.Services.GetRequiredService<IDbContextFactory<AcDbContext>>();
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var entity = await db.Transfers.SingleAsync(x => x.Id == transferId, ct);
+        entity.FileName.ShouldBe("docs.zip");
+    }
+
+    [Fact]
+    public async Task Expired_transfer_is_marked_and_content_deleted()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var create = await _browser.PostAsJsonAsync(
+            "/api/v1/machines/ma_test/workspaces/ws_test/transfers/uploads",
+            new
+            {
+                relDir = "",
+                fileName = "expired.txt",
+                size = 4,
+                sha256 = (string?)null,
+                conflict = "fail",
+            },
+            ct);
+        using var created = JsonDocument.Parse(await create.Content.ReadAsStringAsync(ct));
+        var transferId = created.RootElement.GetProperty("data").GetProperty("transferId").GetString();
+
+        var factory = _host.Services.GetRequiredService<IDbContextFactory<AcDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync(ct))
+        {
+            var entity = await db.Transfers.SingleAsync(x => x.Id == transferId, ct);
+            entity.ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+            await db.SaveChangesAsync(ct);
+        }
+
+        var store = _host.Services.GetRequiredService<TransferStore>();
+        await File.WriteAllBytesAsync(store.DataPath(transferId!), [1, 2, 3, 4], ct);
+        var count = await store.CleanupExpiredAsync(ct);
+        count.ShouldBe(1);
+
+        await using (var db = await factory.CreateDbContextAsync(ct))
+        {
+            var entity = await db.Transfers.SingleAsync(x => x.Id == transferId, ct);
+            entity.Status.ShouldBe(TransferStatuses.Expired);
+        }
+
+        File.Exists(store.DataPath(transferId!)).ShouldBeFalse();
     }
 
     [Fact]

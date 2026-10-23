@@ -40,6 +40,8 @@ public sealed record FileMutationResult(string WorkspaceId, string RelPath, bool
 
 public sealed record FilePreviewQuery(string WorkspaceId, string Path);
 
+public sealed record WorkspaceRegisterRequest(string Path);
+
 public sealed record FilePreviewView(
     string Name,
     string RelPath,

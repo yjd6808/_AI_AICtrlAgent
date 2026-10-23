@@ -196,3 +196,74 @@ Server의 UI watch 집계와 Client의 `StreamSystem`을 연결해, UI가 구독
 - text는 UTF-8 기준 안전을 위해 4000자 단위로 나누며 surrogate pair 경계를 보정한다. flush는 100ms 주기로 session별 `StreamBatch`를 만들고 `AgentPushChannel`로 `PushStream`을 호출한다.
 - `ServerLinkSystem`은 `SetWatchedSessions` 수신, 연결 후 push sender attach, 연결 종료 시 detach·`ClearWatches`를 담당한다. push는 기존 방침대로 best-effort이며 Outbox를 거치지 않는다.
 - 검증: `dotnet build AI-Ctrl-Agent.sln --nologo -v:q` 경고 0/오류 0, `dotnet test AI-Ctrl-Agent.sln --nologo --no-build` 308/308 통과. `ServerLinkSystemTests`의 end-to-end 테스트는 실제 Kestrel·SignalR·SQLite 환경에서 watch lease가 Client까지 도달한 뒤 provider text가 Server ring에 `Replace` chunk로 저장되는 것을 확인한다.
+
+## M5 프론트엔드 — Files·VPN 화면 (2026-10-23)
+
+`web/ai-ctrl-web`의 Files/VPN placeholder를 실제 화면으로 교체하고, M4 파일·전송·VPN API와 연결했다. MSW fixture/handler에 파일 트리, 전송 상태, VPN 국가/도시/서버 스냅샷을 추가해 백엔드 없이 전체 흐름을 검증할 수 있다. 테스트 합계는 프론트엔드 27개, 백엔드 424개(423 통과·1 skip)이며 실패는 없다.
+
+| 파일 | 개수 | 검증 내용 |
+|---|---|---|
+| `app.integration.test.tsx` | 13 | 파일 목록 탐색·텍스트 미리보기, 폴더 생성과 pending 명령 접수, 파일 업로드와 목록 반영, VPN 연결 해제·재연결 명령 추적 |
+| 기존 프론트엔드 테스트 | 14 | 세션 상태·정렬·트리, 신선도 유틸리티, 인증/오류 상태, 명령 이력, 기능 경로 |
+| `dotnet test` | 424 | 기존 백엔드 계약·전송·VPN·스트림 회귀 (423 통과, 1 skip) |
+
+- Files 화면은 워크스페이스 선택, breadcrumb, 정렬, cursor pagination, 텍스트/이미지/바이너리 미리보기, 업로드(충돌 정책), 다운로드(ZIP 포함), 권한 기반 mkdir/rename/delete를 제공한다. URL의 `ws`, `path`, `sort`, `preview`로 상태를 유지한다.
+- 파일 목록은 20초 polling, 변경 명령은 즉시 무효화 후 1.5초 뒤 재무효화한다. 업로드는 chunk 전송 후 `complete`를 호출하고 최대 약 10초간 전송 상태를 확인하며, 다운로드는 `ready`까지 최대 약 60초 대기한다.
+- VPN 화면은 상태·만료·출구 IP, 국가/도시 필터, 서버 부하·점수·최근 연결, 자동/수동 서버 선택, `force` 연결, 연결 해제를 제공한다. 연결/해제 명령은 1초 polling으로 최대 60초 추적하고, 처리 중에는 관련 버튼을 비활성화한다.
+- MSW는 파일 변경·전송·VPN 명령을 pending command로 재현한다. VPN 명령 완료 시 busy 상태를 해제하고, 파일 변경은 목록 무효화로 반영한다.
+- 검증: `npm run typecheck` 오류 0, `npm run lint` 오류 0(기존 경고 3), `npm test` 27/27 통과, `npm run build` 성공, `dotnet test` 423/424 통과(1 skip).
+
+## M6 실제 OpenCode·Client E2E (2026-10-23)
+
+실제 OpenCode `1.18.34`와 Client를 재시작한 뒤 Local API에서 명령을 보내 세션 프롬프트와 응답 수신까지 확인했다. 서버는 `127.0.0.1:5080`, Client Local API는 `127.0.0.1:47800`, OpenCode는 `127.0.0.1:4096`, machineId는 `m_ff1bacd596e84c3e8e0a667958ce50c2`다.
+
+| 항목 | 결과 |
+|---|---|
+| `prompt` command | `93557f3281e244ab9a80b914e88a99df` → `msg_93557f3281e244ab9a80b914e88a99df` |
+| `prompt` command (재시작 후) | `b08db5f7d74643bc973be555cead5c4e` → `msg_b08db5f7d74643bc973be555cead5c4e` |
+| 세션 | `ses_e994ebad7ffeK4iuAxTy7UPSVc` (`AICtrl E2E local API`) |
+| 모델 | `opencode/deepseek-v4.1-flash-free` |
+| 응답 | `AICTRL_E2E_RESTART_OK` |
+| Client 상태 | `serverConnected=true`, `instanceCount=1` |
+| 관리 실행 | `opencode` → `C:\Users\jdyun\AppData\Roaming\npm\opencode.cmd` → `cmd.exe /d /s /c` → `opencode.exe serve` |
+
+- `prompt_async`의 `messageID`는 `msg`로 시작해야 한다. 기존 Client는 `CommandSystem`의 `CommandId`를 그대로 넘겨 400을 받았고, `OpenCodeInstance`에서 `msg_` 접두사를 보정하도록 수정했다. Fake 서버도 같은 규칙으로 400을 반환해 회귀를 재현한다.
+- `OpenCodeProviderTests.Prompt_normalizes_command_id_to_message_id`를 추가했다. 전체 `dotnet test`는 `423 통과, 1 skip, 424 total`, 빌드는 경고 0/오류 0이다.
+- 관리 실행은 `AICTRL__opencode__executable` 환경 변수 없이 재시작해 검증했다. `ProcessBackendController`가 Windows npm shim(`.cmd`)을 찾아 `cmd.exe /d /s /c`로 실행하고, OpenCode 자식 프로세스가 `4096`에서 listen하는 것을 확인했다.
+- 기본 모델 `anthropic/claude-sonnet-4-6`은 `ANTHROPIC_BASE_URL=http://localhost:8082`를 상속하지만 해당 로컬 게이트웨이가 없어 `Cannot connect to API`로 실패한다. 위 E2E는 Local API `model` override로 `opencode/deepseek-v4.1-flash-free`를 지정해 검증했다. 서버/Client 설정을 바꾸지 않았다.
+- VPN은 `NL#606` 연결 상태를 유지했고, 이번 E2E에서 disconnect/connect를 수행하지 않았다. 따라서 `protonvpn-auto` 서버 전환과 split tunneling 경로는 아직 실측하지 않았다.
+- Local API `/status`의 `serverConnected`는 `ServerLinkPresence`를 반영하도록 수정했다. `sessionCount`는 재시작 직후 이벤트가 없을 때 `0`으로 남을 수 있으므로 UI는 `/sessions` 목록을 기준으로 사용해야 한다.
+- 실제 Google 로그인 기반 UI E2E는 아직 수행하지 않았다. 테스트용 인증 우회는 추가하지 않는다.
+
+## M7 protonvpn-auto 상태 연동 (2026-10-23)
+
+`protonvpn-auto.exe`를 VPN 백엔드로 사용할 수 있도록 `ProtonVpnCli`와 `VpnSystem`을 확장했다. 기존 Bun CLI와 응답 스키마가 달라 상태·서버·연결 결과 파서를 분리했고, 실제 Client에서 `status --json`을 읽어 Server DB `machine_vpn_state`까지 전달되는 것을 확인했다.
+
+| 항목 | 결과 |
+|---|---|
+| 실행 파일 | `E:\_Dev\protonvpn-auto\protonvpn-auto.exe` |
+| 명령 | `status --json`, `servers {code} --json --limit 2000`, `connect {server} --json --timeout {seconds}`, `disconnect --json --timeout {seconds}` |
+| 감지 | `PROTONVPN_AUTO` 또는 실행 파일명 `protonvpn-auto` |
+| helper | auto 모드에서는 `HelperVpnProcessRunner`를 우회하고 로컬 프로세스로 실행 |
+| GUI | `ProtonVPN.Client` 프로세스를 GUI로 감지하고, auto 모드에서는 동시 실행 경고를 표시하지 않음 |
+| 실시간 상태 | `JP#277`, country `JP`, city `도쿄도`, exitIp `159.26.119.36` |
+| 상태 플래그 | `usesProtonApp=true`, `protonGuiRunning=true`, `helperAvailable=false`, `signedIn=true`, `username=null` |
+| 표시 문구 | `Proton VPN 앱 · 터널 연결됨 (JP#277)` |
+| 계정 표시 | auto 모드에서 username이 없으면 `Proton VPN 앱`으로 표시 |
+
+- auto connect 응답은 `connected`가 boolean이고, 기존 Bun CLI는 `connected`가 객체다. 두 형태를 모두 파싱하며 auto 서버 ID는 정규식 `[A-Za-z]{2}#\d+`로 추출한다.
+- auto 서버 목록의 `tier`는 문자열(`FREE`/`BASIC`/`PLUS`/`UNLIMITED`)이므로 숫자 등급으로 매핑하고, 국가명은 응답 루트의 `country`를 fallback으로 사용한다.
+- `VpnStatusView.UsesProtonApp`을 추가하고, auto 모드에서는 helper/GUI 충돌 경고를 숨기며 계정 미확인 상태를 `로그인 안 됨`으로 오표시하지 않도록 수정했다.
+- Vitest가 `e2e/*.spec.ts`를 수집해 Playwright와 충돌하던 문제를 `test.include = src/**/*.{test,spec}.{ts,tsx}`로 분리했다.
+- 검증: `npm test` 28/28 통과, `npm run typecheck` 오류 0, `npm run build` 성공, `dotnet build` 경고 0/오류 0, `dotnet test` 429 통과·1 skip·430 total.
+- 관찰 중 VPN 서버가 `NL#853` → `LT#33` → `JP#277`로 변경됐다. Client가 connect/disconnect를 실행한 것은 아니며, 실제 서버 전환과 split tunneling 경로는 여전히 미실측이다.
+
+## M8 API 인증 challenge 정리 (2026-10-23)
+
+실제 SPA를 `http://127.0.0.1:5080/index.html`로 열었을 때 `/api/v1/auth/me`가 Google OAuth로 302 redirect되고, 브라우저 fetch가 CORS 오류로 실패해 로그인 화면 대신 `서버에 연결할 수 없습니다`가 표시됐다. 쿠키 인증의 기본 challenge가 API 요청에도 로그인 redirect를 반환한 것이 원인이었다.
+
+- `AuthenticationSetup`의 쿠키 이벤트에서 `/api` 경로는 redirect 대신 `401`/`403` `application/problem+json`을 반환하도록 수정했다. `/hubs/*`와 일반 경로는 기존 redirect 동작을 유지한다.
+- `AcErrorCodes.Forbidden`을 추가하고 access denied 응답에 사용한다.
+- 회귀 테스트 `AuthEndpointTests.Api_returns_401_problem_for_unauthenticated_requests`가 `/api/v1/auth/me`와 `/api/v1/machines`의 401 problem 응답을 검증한다.
+- 검증: `dotnet build` 경고 0/오류 0, `dotnet test` 429 통과·1 skip·430 total. 실제 서버에서 두 경로 모두 `401 Unauthorized` + `application/problem+json`을 반환했고, 브라우저는 `/index.html`에서 `/login`으로 이동해 `원격 제어 콘솔`과 `Google로 로그인` 링크를 표시했다.
+- 실제 Google 계정 로그인과 로그인 후 UI E2E는 아직 수행하지 않았다. `__Host-aictrl` 쿠키의 `SecurePolicy.Always`가 로컬 HTTP에서 어떻게 동작하는지도 로그인 후 확인해야 한다. 테스트용 인증 우회는 추가하지 않는다.

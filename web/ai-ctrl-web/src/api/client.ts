@@ -9,6 +9,10 @@ import type {
   CommandOutcome,
   CommandPendingView,
   EnrollmentCode,
+  FileListPage,
+  FilePreviewView,
+  FileSort,
+  FileStatView,
   InstanceInfo,
   LogFileView,
   LogTextView,
@@ -22,12 +26,19 @@ import type {
   SessionSummary,
   SessionView,
   PromptInput,
+  TransferCommandView,
+  TransferCreatedView,
+  TransferStatusView,
+  UploadConflict,
+  VpnConnectInput,
+  VpnPageSnapshot,
+  WorkspaceInfo,
 } from './types'
 
 type QueryValue = string | number | boolean | null | undefined
 
 export type RequestOptions = {
-  method?: 'GET' | 'POST' | 'DELETE'
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE'
   query?: Record<string, QueryValue>
   body?: unknown
   signal?: AbortSignal
@@ -87,10 +98,26 @@ async function parseBody(response: Response): Promise<unknown> {
   }
 }
 
+function isBinaryBody(value: unknown): value is Blob | ArrayBuffer | ArrayBufferView {
+  return (
+    value instanceof Blob ||
+    value instanceof ArrayBuffer ||
+    ArrayBuffer.isView(value)
+  )
+}
+
 async function request<T>(path: string, options: RequestOptions = {}): Promise<ApiResult<T>> {
   const headers = new Headers({ Accept: 'application/json' })
+  let payload: BodyInit | undefined
   if (options.body !== undefined) {
-    headers.set('Content-Type', 'application/json')
+    if (isBinaryBody(options.body)) {
+      payload = options.body as BodyInit
+      const type = options.body instanceof Blob ? options.body.type : ''
+      headers.set('Content-Type', type || 'application/octet-stream')
+    } else {
+      headers.set('Content-Type', 'application/json')
+      payload = JSON.stringify(options.body)
+    }
   }
   if (options.requestId) {
     headers.set('X-Request-Id', options.requestId)
@@ -103,7 +130,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<A
     method: options.method ?? 'GET',
     credentials: 'same-origin',
     headers,
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    body: payload,
     signal: options.signal,
   })
 
@@ -164,6 +191,20 @@ export const api = {
     return request<T>(path, { ...options, method: 'POST' })
   },
 
+  postEnvelope<T>(path: string, options: RequestOptions = {}): Promise<ApiResult<ApiEnvelope<T>>> {
+    return request<unknown>(path, { ...options, method: 'POST' }).then((result) => ({
+      ...result,
+      data: assertEnvelope<T>(result.data),
+    }))
+  },
+
+  putEnvelope<T>(path: string, options: RequestOptions = {}): Promise<ApiResult<ApiEnvelope<T>>> {
+    return request<unknown>(path, { ...options, method: 'PUT' }).then((result) => ({
+      ...result,
+      data: assertEnvelope<T>(result.data),
+    }))
+  },
+
   postCommand(path: string, options: RequestOptions): Promise<ApiResult<CommandOutcome>> {
     return request<unknown>(path, { ...options, method: 'POST' }).then((result) => {
       const envelope = assertEnvelope<CommandDetailView | CommandPendingView>(result.data)
@@ -213,6 +254,36 @@ export const apiPaths = {
   serverLog: (name: string) => `/logs/server/${encodeURIComponent(name)}`,
   enrollmentCodes: '/machines/enrollment-codes',
   revokeMachine: (machineId: string) => machinePath(machineId),
+  workspaces: (machineId: string) => `${machinePath(machineId)}/workspaces`,
+  files: (machineId: string, workspaceId: string) =>
+    `${machinePath(machineId)}/workspaces/${encodeURIComponent(workspaceId)}/files`,
+  fileStat: (machineId: string, workspaceId: string) =>
+    `${machinePath(machineId)}/workspaces/${encodeURIComponent(workspaceId)}/files/stat`,
+  filePreview: (machineId: string, workspaceId: string) =>
+    `${machinePath(machineId)}/workspaces/${encodeURIComponent(workspaceId)}/files/preview`,
+  fileMkdir: (machineId: string, workspaceId: string) =>
+    `${machinePath(machineId)}/workspaces/${encodeURIComponent(workspaceId)}/files/mkdir`,
+  fileDelete: (machineId: string, workspaceId: string) =>
+    `${machinePath(machineId)}/workspaces/${encodeURIComponent(workspaceId)}/files/delete`,
+  fileRename: (machineId: string, workspaceId: string) =>
+    `${machinePath(machineId)}/workspaces/${encodeURIComponent(workspaceId)}/files/rename`,
+  uploads: (machineId: string, workspaceId: string) =>
+    `${machinePath(machineId)}/workspaces/${encodeURIComponent(workspaceId)}/transfers/uploads`,
+  downloads: (machineId: string, workspaceId: string) =>
+    `${machinePath(machineId)}/workspaces/${encodeURIComponent(workspaceId)}/transfers/downloads`,
+  transfer: (machineId: string, transferId: string) =>
+    `${machinePath(machineId)}/transfers/${encodeURIComponent(transferId)}`,
+  transferChunk: (machineId: string, transferId: string, index: number) =>
+    `${machinePath(machineId)}/transfers/${encodeURIComponent(transferId)}/chunks/${index}`,
+  transferComplete: (machineId: string, transferId: string) =>
+    `${machinePath(machineId)}/transfers/${encodeURIComponent(transferId)}/complete`,
+  transferDispatch: (machineId: string, transferId: string) =>
+    `${machinePath(machineId)}/transfers/${encodeURIComponent(transferId)}/dispatch`,
+  transferContent: (machineId: string, transferId: string) =>
+    `${machinePath(machineId)}/transfers/${encodeURIComponent(transferId)}/content`,
+  vpnPage: (machineId: string) => `${machinePath(machineId)}/vpn/page`,
+  vpnConnect: (machineId: string) => `${machinePath(machineId)}/vpn/connect`,
+  vpnDisconnect: (machineId: string) => `${machinePath(machineId)}/vpn/disconnect`,
 }
 
 export function loginUrl(returnUrl: string): string {
@@ -419,4 +490,207 @@ export async function replyPermission(
     },
   )
   return result
+}
+
+export async function fetchWorkspaces(machineId: string, signal?: AbortSignal) {
+  const result = await api.getEnvelope<WorkspaceInfo[]>(apiPaths.workspaces(machineId), {
+    signal,
+  })
+  return { data: result.data.data, meta: result.data.meta }
+}
+
+export async function fetchFiles(
+  machineId: string,
+  workspaceId: string,
+  path: string,
+  sort: FileSort,
+  cursor: string | null | undefined,
+  signal?: AbortSignal,
+) {
+  const result = await api.getEnvelope<FileListPage>(apiPaths.files(machineId, workspaceId), {
+    query: { path, sort, cursor, limit: 500 },
+    signal,
+  })
+  return { data: result.data.data, meta: result.data.meta }
+}
+
+export async function fetchFileStat(
+  machineId: string,
+  workspaceId: string,
+  path: string,
+  signal?: AbortSignal,
+) {
+  const result = await api.getEnvelope<FileStatView>(apiPaths.fileStat(machineId, workspaceId), {
+    query: { path },
+    signal,
+  })
+  return { data: result.data.data, meta: result.data.meta }
+}
+
+export async function fetchFilePreview(
+  machineId: string,
+  workspaceId: string,
+  path: string,
+  signal?: AbortSignal,
+) {
+  const result = await api.getEnvelope<FilePreviewView>(
+    apiPaths.filePreview(machineId, workspaceId),
+    { query: { path }, signal },
+  )
+  return { data: result.data.data, meta: result.data.meta }
+}
+
+export async function mkdir(
+  machineId: string,
+  workspaceId: string,
+  relPath: string,
+  requestId: string,
+) {
+  return api.postCommand(apiPaths.fileMkdir(machineId, workspaceId), {
+    body: { relPath },
+    requestId,
+    idempotencyKey: requestId,
+  })
+}
+
+export async function deleteFile(
+  machineId: string,
+  workspaceId: string,
+  relPath: string,
+  requestId: string,
+) {
+  return api.postCommand(apiPaths.fileDelete(machineId, workspaceId), {
+    body: { relPath },
+    requestId,
+    idempotencyKey: requestId,
+  })
+}
+
+export async function renameFile(
+  machineId: string,
+  workspaceId: string,
+  relPath: string,
+  newName: string,
+  requestId: string,
+) {
+  return api.postCommand(apiPaths.fileRename(machineId, workspaceId), {
+    body: { relPath, newName },
+    requestId,
+    idempotencyKey: requestId,
+  })
+}
+
+export async function createUpload(
+  machineId: string,
+  workspaceId: string,
+  input: { relDir: string; fileName: string; size: number; sha256?: string; conflict: UploadConflict },
+) {
+  const result = await api.postEnvelope<TransferCreatedView>(
+    apiPaths.uploads(machineId, workspaceId),
+    {
+      body: {
+        relDir: input.relDir,
+        fileName: input.fileName,
+        size: input.size,
+        sha256: input.sha256 ?? null,
+        conflict: input.conflict,
+      },
+    },
+  )
+  return result.data.data
+}
+
+export async function putTransferChunk(
+  machineId: string,
+  transferId: string,
+  index: number,
+  chunk: Blob,
+) {
+  const result = await api.putEnvelope<TransferStatusView>(
+    apiPaths.transferChunk(machineId, transferId, index),
+    { body: chunk },
+  )
+  return result.data.data
+}
+
+export async function completeTransfer(machineId: string, transferId: string) {
+  const result = await api.postEnvelope<TransferStatusView>(
+    apiPaths.transferComplete(machineId, transferId),
+  )
+  return result.data.data
+}
+
+export async function dispatchTransfer(machineId: string, transferId: string) {
+  const result = await api.postEnvelope<TransferCommandView>(
+    apiPaths.transferDispatch(machineId, transferId),
+  )
+  return result.data.data
+}
+
+export async function fetchTransfer(
+  machineId: string,
+  transferId: string,
+  signal?: AbortSignal,
+) {
+  const result = await api.getEnvelope<TransferStatusView>(
+    apiPaths.transfer(machineId, transferId),
+    { signal },
+  )
+  return result.data.data
+}
+
+export async function createDownload(
+  machineId: string,
+  workspaceId: string,
+  relPath: string,
+  asZip: boolean,
+) {
+  const result = await api.postEnvelope<TransferCreatedView>(
+    apiPaths.downloads(machineId, workspaceId),
+    { body: { relPath, asZip } },
+  )
+  return result.data.data
+}
+
+export function transferContentUrl(machineId: string, transferId: string) {
+  return buildUrl(apiPaths.transferContent(machineId, transferId))
+}
+
+export async function fetchVpnPage(
+  machineId: string,
+  country: string | undefined,
+  prevCity: string | undefined,
+  signal?: AbortSignal,
+) {
+  const result = await api.getEnvelope<VpnPageSnapshot>(apiPaths.vpnPage(machineId), {
+    query: { country, prevCity },
+    signal,
+  })
+  return { data: result.data.data, meta: result.data.meta }
+}
+
+export async function connectVpn(
+  machineId: string,
+  input: VpnConnectInput,
+  requestId: string,
+) {
+  return api.postCommand(apiPaths.vpnConnect(machineId), {
+    query: { wait: 0 },
+    body: {
+      server: input.server ?? null,
+      country: input.country ?? null,
+      city: input.city ?? null,
+      force: input.force ?? false,
+    },
+    requestId,
+    idempotencyKey: requestId,
+  })
+}
+
+export async function disconnectVpn(machineId: string, requestId: string) {
+  return api.postCommand(apiPaths.vpnDisconnect(machineId), {
+    query: { wait: 0 },
+    requestId,
+    idempotencyKey: requestId,
+  })
 }

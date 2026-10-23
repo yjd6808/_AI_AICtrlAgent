@@ -31,8 +31,14 @@ public sealed class UiHub : Hub<IUiClient>, IUiHub
     public override async Task OnConnectedAsync()
     {
         var machines = await _db.GetMachinesAsync(Context.ConnectionAborted).ConfigureAwait(false);
+        var vpnStates = await _db
+            .GetVpnStatesAsync(machines.Select(machine => machine.Id).ToArray(), Context.ConnectionAborted)
+            .ConfigureAwait(false);
         var views = machines
-            .Select(machine => MachineViewFactory.Create(machine, _connections))
+            .Select(machine => MachineViewFactory.Create(
+                machine,
+                _connections,
+                vpnStates.GetValueOrDefault(machine.Id)))
             .ToList();
         await Clients.Caller.FleetSnapshot(new FleetSnapshotDto(views)).ConfigureAwait(false);
         await base.OnConnectedAsync().ConfigureAwait(false);

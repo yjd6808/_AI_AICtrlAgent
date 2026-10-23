@@ -176,6 +176,8 @@ public static class AcDefaultConfigs
 
         vpn:
           enabled: true
+          helperEnabled: true
+          helperTokenPath: ''
           cliPath: ''
           connectTimeoutSeconds: 90
           statusPollSeconds: 30
@@ -184,6 +186,19 @@ public static class AcDefaultConfigs
             mode: TunnelReady
             readyUrl: 'http://127.0.0.1:20241/ready'
             minutes: 5
+          recovery:
+            enabled: false
+            discordWebhookUrl: ''
+            autoConnectVpn: true
+            autoResume: true
+            handleRateLimited: true
+            handleStalled: true
+            continuationPrompt: 'Continue from where you stopped. Do not repeat completed work.'
+            country: ''
+            city: ''
+            servers: []
+            cooldownSeconds: 600
+            maxAttemptsPerSession: 3
 
         reconnect:
           maxBackoffSeconds: 30

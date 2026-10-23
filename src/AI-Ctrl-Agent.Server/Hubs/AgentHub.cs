@@ -26,6 +26,8 @@ public sealed class AgentHub : Hub<IAgentClient>, IAgentHub
 
     private readonly IHubContext<AgentHub> _hub;
 
+    private readonly IHubContext<UiHub, IUiClient> _ui;
+
     private readonly SessionStreamHub _streams;
 
     private readonly SessionWatchCoordinator _watches;
@@ -37,6 +39,7 @@ public sealed class AgentHub : Hub<IAgentClient>, IAgentHub
         TimeProvider time,
         ILogger<AgentHub> logger,
         IHubContext<AgentHub> hub,
+        IHubContext<UiHub, IUiClient> ui,
         SessionStreamHub streams,
         SessionWatchCoordinator watches)
     {
@@ -46,6 +49,7 @@ public sealed class AgentHub : Hub<IAgentClient>, IAgentHub
         ArgumentNullException.ThrowIfNull(time);
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(hub);
+        ArgumentNullException.ThrowIfNull(ui);
         ArgumentNullException.ThrowIfNull(streams);
         ArgumentNullException.ThrowIfNull(watches);
         _connections = connections;
@@ -54,6 +58,7 @@ public sealed class AgentHub : Hub<IAgentClient>, IAgentHub
         _time = time;
         _logger = logger;
         _hub = hub;
+        _ui = ui;
         _streams = streams;
         _watches = watches;
     }
@@ -161,12 +166,19 @@ public sealed class AgentHub : Hub<IAgentClient>, IAgentHub
         }
 
         var applied = await _db.ApplyEventsAsync(batch.MachineId.Value, batch.Events, Context.ConnectionAborted).ConfigureAwait(false);
-        if (applied < 0)
+        if (applied.LastAppliedEventSeq < 0)
         {
             throw new HubException(AcErrorCodes.MachineNotFound);
         }
 
-        return new EventsAck(applied);
+        foreach (var state in applied.VpnStates)
+        {
+            await _ui.Clients.All
+                .VpnChanged(batch.MachineId, state)
+                .ConfigureAwait(false);
+        }
+
+        return new EventsAck(applied.LastAppliedEventSeq);
     }
 
     public Task<Ack> PushSnapshot(MachineSnapshot snapshot)

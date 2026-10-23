@@ -10,6 +10,7 @@ using AiCtrl.Client.Workspace;
 using AiCtrl.Core.Commands;
 using AiCtrl.Core.Protocol;
 using AiCtrl.Server.Security;
+using AiCtrl.Server.Transfers;
 using AiCtrl.Tests.Server;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
@@ -38,6 +39,8 @@ public sealed class TransferSystemTests : IAsyncLifetime
 
     private string _tempDirectory = string.Empty;
 
+    private string _token = string.Empty;
+
     public TransferSystemTests()
     {
         _handler = new HttpClientHandler
@@ -51,7 +54,13 @@ public sealed class TransferSystemTests : IAsyncLifetime
     public async ValueTask InitializeAsync()
     {
         var ct = TestContext.Current.CancellationToken;
-        _host = await TestServerHost.StartAsync(_directory);
+        _host = await TestServerHost.StartAsync(
+            _directory,
+            transferOptions: new TransferOptions
+            {
+                Dir = Path.Combine(_directory, "transfers"),
+                ChunkBytes = 4,
+            });
         _http.BaseAddress = new Uri(_host.BaseUrl);
         using var login = await _http.PostAsync(
             "/test-login?email=test%40example.com&name=Test+User",
@@ -73,9 +82,9 @@ public sealed class TransferSystemTests : IAsyncLifetime
             DenyPatterns: []);
         _workspaces = new WorkspaceRegistry(new WorkspaceOptions([workspace], []));
         _tempDirectory = Path.Combine(_directory, "transfers");
-        var token = _host.Services.GetRequiredService<AgentTokenService>().Create("ma_test", out _);
+        _token = _host.Services.GetRequiredService<AgentTokenService>().Create("ma_test", out _);
         var link = new TransferLinkState();
-        link.Set(new ServerApiClient(_host.BaseUrl, _http), token);
+        link.Set(new ServerApiClient(_host.BaseUrl, _http), _token);
         _transfers = new TransferSystem(
             _db,
             _workspaces,
@@ -175,6 +184,48 @@ public sealed class TransferSystemTests : IAsyncLifetime
         served.ShouldBe(content);
     }
 
+    [Fact]
+    public async Task Send_resumes_after_begin_preserves_received_chunks()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var content = Encoding.UTF8.GetBytes("0123456789");
+        var sha = Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();
+        await File.WriteAllBytesAsync(Path.Combine(_workspaceRoot, "resume.bin"), content, ct);
+        var workspaceId = _workspaces.Entries[0].WorkspaceId;
+
+        using var create = await _http.PostAsJsonAsync(
+            $"/api/v1/machines/ma_test/workspaces/{workspaceId}/transfers/downloads",
+            new { relPath = "resume.bin", asZip = false },
+            ct);
+        create.StatusCode.ShouldBe(HttpStatusCode.Created);
+        using var created = JsonDocument.Parse(await create.Content.ReadAsStringAsync(ct));
+        var transferId = created.RootElement.GetProperty("data").GetProperty("transferId").GetString()!;
+
+        var api = new ServerApiClient(_host.BaseUrl, _http);
+        var first = await api.BeginTransferAsync(
+            transferId,
+            new TransferBeginRequest(content.Length, sha),
+            _token,
+            ct);
+        first.ChunksTotal.ShouldBe(3);
+        await api.PutTransferChunkAsync(transferId, 0, content[..4], _token, ct);
+        var resumed = await api.BeginTransferAsync(
+            transferId,
+            new TransferBeginRequest(content.Length, sha),
+            _token,
+            ct);
+        resumed.ReceivedChunks.ShouldContain(0);
+
+        await _transfers.SendAsync(
+            new FilesSendPayload(transferId, workspaceId, "resume.bin", AsZip: false),
+            ct);
+
+        var served = await _http.GetByteArrayAsync(
+            $"/api/v1/machines/ma_test/transfers/{transferId}/content",
+            ct);
+        served.ShouldBe(content);
+    }
+
     private async Task<string> CreateUploadAsync(
         string workspaceId,
         byte[] content,
@@ -197,12 +248,17 @@ public sealed class TransferSystemTests : IAsyncLifetime
         var transferId = created.RootElement.GetProperty("data").GetProperty("transferId").GetString();
         transferId.ShouldNotBeNullOrWhiteSpace();
 
-        using var chunk = new ByteArrayContent(content);
-        using var put = await _http.PutAsync(
-            $"/api/v1/machines/ma_test/transfers/{transferId}/chunks/0",
-            chunk,
-            ct);
-        put.StatusCode.ShouldBe(HttpStatusCode.OK);
+        for (var index = 0; index * 4 < content.Length; index++)
+        {
+            var offset = index * 4;
+            using var chunk = new ByteArrayContent(content[offset..Math.Min(offset + 4, content.Length)]);
+            using var put = await _http.PutAsync(
+                $"/api/v1/machines/ma_test/transfers/{transferId}/chunks/{index}",
+                chunk,
+                ct);
+            put.StatusCode.ShouldBe(HttpStatusCode.OK);
+        }
+
         using var complete = await _http.PostAsync(
             $"/api/v1/machines/ma_test/transfers/{transferId}/complete",
             null,

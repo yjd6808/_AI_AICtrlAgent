@@ -35,6 +35,14 @@ public static class QueryTypes
     public const string LogsList = "logs.list";
 
     public const string LogsTail = "logs.tail";
+
+    public const string VpnPage = "vpn.page";
+
+    public const string VpnStatus = "vpn.status";
+
+    public const string VpnCountries = "vpn.countries";
+
+    public const string VpnServers = "vpn.servers";
 }
 
 public sealed record AgentInstancesQuery(string? Kind);
@@ -66,3 +74,9 @@ public sealed record LogsTailQuery(
     string Scope,
     string Name,
     int Lines);
+
+public sealed record VpnPageQuery(string? Country, string? PrevCity);
+
+public sealed record VpnServersQuery(string Country, string? PrevCity, bool Refresh = false);
+
+public sealed record VpnConnectRequest(string? Server, string? Country, string? City, bool Force = false);

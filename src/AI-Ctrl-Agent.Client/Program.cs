@@ -5,6 +5,7 @@ using AiCtrl.Client.Security;
 using AiCtrl.Client.Storage;
 using AiCtrl.Client.Systems;
 using AiCtrl.Client.Transfers;
+using AiCtrl.Client.Vpn;
 using AiCtrl.Client.Workspace;
 using AiCtrl.Core.Config;
 using AiCtrl.Core.Logging;
@@ -34,6 +35,18 @@ var logOptions = AcLogBootstrap.ReadOptions(builder.Configuration);
 AcLog.Initialize("Client", logOptions);
 builder.Logging.AddAcLog(logOptions);
 
+if (args.Length > 0 && string.Equals(args[0], "--vpn-helper", StringComparison.OrdinalIgnoreCase))
+{
+    using var helperCts = new CancellationTokenSource();
+    Console.CancelKeyPress += (_, e) =>
+    {
+        e.Cancel = true;
+        helperCts.Cancel();
+    };
+    var helperOptions = VpnOptions.FromConfiguration(builder.Configuration);
+    return await VpnHelperHost.RunConsoleAsync(helperOptions, helperCts.Token).ConfigureAwait(false);
+}
+
 if (args.Length > 0 && string.Equals(args[0], "enroll", StringComparison.OrdinalIgnoreCase))
 {
     return await EnrollmentCli.RunAsync(args.Skip(1).ToArray(), builder.Configuration, CancellationToken.None).ConfigureAwait(false);
@@ -57,11 +70,17 @@ var registry = new ProviderInstanceRegistry(machineId);
 var workspaceOptions = WorkspaceOptions.FromConfiguration(builder.Configuration);
 var workspaceRegistry = new WorkspaceRegistry(workspaceOptions);
 var filesSystem = new FilesSystem(workspaceRegistry);
+var workspaceRegistrations = new WorkspaceRegistrationStore(
+    AcDefaultConfigs.OverridesPathFor(clientConfigPath));
 var transferLink = new TransferLinkState();
 var monitorOptions = MonitorOptions.FromConfiguration(builder.Configuration);
 var providerHostOptions = ProviderHostOptions.FromConfiguration(builder.Configuration);
 var localApiOptions = LocalApiOptions.FromConfiguration(builder.Configuration);
 var serverLinkOptions = ServerLinkOptions.FromConfiguration(builder.Configuration);
+var vpnOptions = VpnOptions.FromConfiguration(builder.Configuration);
+var vpnRecoveryOptions = VpnRecoveryOptions.FromConfiguration(builder.Configuration);
+var vpnHelper = vpnOptions.HelperEnabled ? new VpnHelperClient(vpnOptions.HelperTokenPath) : null;
+var serverLinkPresence = new ServerLinkPresence();
 var secrets = new DpapiSecretStore(ClientPaths.SecretsPath);
 var deviceKeys = new DeviceKeyStore(secrets);
 var outbox = new OutboxStore(clientDb, time);
@@ -83,6 +102,9 @@ builder.Services.AddSingleton<ISecretStore>(secrets);
 builder.Services.AddSingleton(deviceKeys);
 builder.Services.AddSingleton(outbox);
 builder.Services.AddSingleton(serverLinkOptions);
+builder.Services.AddSingleton(vpnOptions);
+builder.Services.AddSingleton(vpnRecoveryOptions);
+builder.Services.AddSingleton(serverLinkPresence);
 builder.Services.AddSingleton<INetworkChangeSignal>(network);
 builder.Services.AddSingleton<IProviderInstanceRegistry>(registry);
 builder.Services.AddSingleton(sp => new SessionActorPool(sp.GetRequiredService<ILoggerFactory>()));
@@ -98,7 +120,9 @@ builder.Services.AddSingleton(sp => new CommandSystem(
     filesSystem,
     sp.GetRequiredService<TransferSystem>(),
     time,
-    sp.GetRequiredService<ILogger<CommandSystem>>()));
+    sp.GetRequiredService<ILogger<CommandSystem>>(),
+    workspaceRegistrations,
+    sp.GetRequiredService<VpnSystem>()));
 
 builder.Services.AddSingleton(sp => new ProviderHostSystem(
     registry,
@@ -124,6 +148,27 @@ builder.Services.AddSingleton(sp => new StateSystem(
     time,
     monitorOptions,
     sp.GetRequiredService<ILoggerFactory>()));
+builder.Services.AddSingleton(sp => new VpnSystem(
+    vpnOptions,
+    outbox,
+    time,
+    sp.GetRequiredService<ILogger<VpnSystem>>(),
+    sp.GetRequiredService<StateSystem>(),
+    helper: vpnHelper,
+    serverLinkConnected: () => serverLinkPresence.IsConnected));
+builder.Services.AddSingleton<IVpnRecoveryNotifier>(sp => new DiscordVpnRecoveryNotifier(
+    vpnRecoveryOptions,
+    sp.GetRequiredService<ILogger<DiscordVpnRecoveryNotifier>>()));
+builder.Services.AddSingleton<IVpnRecoveryActions>(sp => new VpnRecoveryActions(
+    sp.GetRequiredService<VpnSystem>(),
+    registry,
+    sp.GetRequiredService<AbortAndPromptRunner>(),
+    vpnRecoveryOptions));
+builder.Services.AddSingleton(sp => new VpnRecoverySystem(
+    sp.GetRequiredService<IVpnRecoveryActions>(),
+    sp.GetRequiredService<IVpnRecoveryNotifier>(),
+    vpnRecoveryOptions,
+    sp.GetRequiredService<ILogger<VpnRecoverySystem>>()));
 builder.Services.AddSingleton(sp => new LocalApiSystem(
     sp.GetRequiredService<CommandSystem>(),
     registry,
@@ -131,7 +176,8 @@ builder.Services.AddSingleton(sp => new LocalApiSystem(
     filesSystem,
     localApiOptions,
     time,
-    sp.GetRequiredService<ILoggerFactory>()));
+    sp.GetRequiredService<ILoggerFactory>(),
+    () => serverLinkPresence.IsConnected));
 builder.Services.AddSingleton(sp => new ClientRequestHandler(
     sp.GetRequiredService<CommandSystem>(),
     journal,
@@ -139,7 +185,8 @@ builder.Services.AddSingleton(sp => new ClientRequestHandler(
     sp.GetRequiredService<StateSystem>(),
     filesSystem,
     time,
-    sp.GetRequiredService<ILogger<ClientRequestHandler>>()));
+    sp.GetRequiredService<ILogger<ClientRequestHandler>>(),
+    sp.GetRequiredService<VpnSystem>()));
 builder.Services.AddSingleton(sp => new ServerLinkSystem(
     clientDb,
     sp.GetRequiredService<DeviceKeyStore>(),
@@ -151,12 +198,15 @@ builder.Services.AddSingleton(sp => new ServerLinkSystem(
     serverLinkOptions,
     sp.GetRequiredService<INetworkChangeSignal>(),
     time,
-    sp.GetRequiredService<ILogger<ServerLinkSystem>>()));
+    sp.GetRequiredService<ILogger<ServerLinkSystem>>(),
+    serverLinkPresence));
 
 builder.Services.AddSingleton<IAcSystem>(sp => sp.GetRequiredService<ProviderHostSystem>());
 builder.Services.AddSingleton<IAcSystem>(sp => sp.GetRequiredService<MonitorSystem>());
 builder.Services.AddSingleton<IAcSystem>(sp => sp.GetRequiredService<StreamSystem>());
 builder.Services.AddSingleton<IAcSystem>(sp => sp.GetRequiredService<StateSystem>());
+builder.Services.AddSingleton<IAcSystem>(sp => sp.GetRequiredService<VpnSystem>());
+builder.Services.AddSingleton<IAcSystem>(sp => sp.GetRequiredService<VpnRecoverySystem>());
 builder.Services.AddSingleton<IAcSystem>(sp => sp.GetRequiredService<LocalApiSystem>());
 builder.Services.AddSingleton<IAcSystem>(sp => sp.GetRequiredService<ServerLinkSystem>());
 builder.Services.AddSingleton<IAcSystem>(sp => sp.GetRequiredService<TransferSystem>());

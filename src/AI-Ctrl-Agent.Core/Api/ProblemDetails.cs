@@ -74,6 +74,8 @@ public static class AcErrorCodes
 
     public const string Unauthorized = "unauthorized";
 
+    public const string Forbidden = "forbidden";
+
     public const string InvalidHost = "invalid_host";
 
     public const string InvalidCode = "invalid_code";

@@ -2,7 +2,7 @@
 
 이 문서는 M5 프론트엔드가 M4 백엔드와 연동할 때 확인된 미구현 API, 계약상 제약, 프론트엔드가 의도적으로 제공하지 않는 기능을 정리합니다.
 
-- 기준일: 2026-10-20
+- 기준일: 2026-10-23
 - 기준 계약: `src/AI-Ctrl-Agent.Core/Api/M4Contracts.cs`, `LocalApiContracts.cs`, `src/AI-Ctrl-Agent.Server/Endpoints/ServerEndpoints.cs`
 - 원칙: 서버에 없는 기능을 가짜 데이터나 낙관적 UI로 대체하지 않습니다.
 
@@ -13,8 +13,8 @@
 | 세션 생성 | 엔드포인트 없음 | 생성 UI 없음 | 새 세션은 기존 Agent/CLI에서 만들어야 함 |
 | 권한 응답 | 응답 엔드포인트는 있으나 요청 상세 없음 | 승인/거부 UI 숨김 | `WaitingPermission`은 중단 또는 중단 후 전송만 가능 |
 | 실시간 push | 브라우저용 채널 없음 | React Query polling | 최대 polling 간격만큼 지연 |
-| Files | API 없음 | 준비 중 화면 | 파일 탐색 불가 |
-| VPN | API 없음 | 준비 중 화면 | VPN 상태/제어 불가 |
+| Files | 조회/변경/전송 API 제공 | 실제 화면 | 진행률·재개 등 일부 제약 있음 |
+| VPN | 상태/서버/연결 API 제공 | 실제 화면 | 서버 목록 강제 갱신 UI 없음 |
 | Diagnostics | API 없음 | 준비 중 화면 | 진단 정보 수집 불가 |
 | 클라이언트 로그 | 수집/조회 API 없음 | 서버 전역 로그만 표시 | 머신·세션별 Client 로그 확인 불가 |
 | Diff | API 없음 | Diff 뷰어 없음 | 변경 파일 비교 불가 |
@@ -64,18 +64,14 @@ M4 엔드포인트 목록에는 브라우저용 WebSocket/SSE/UI Hub가 없습�
 - 종료된 명령 목록 5초
 - 감사 5초 또는 15초
 - 서버 로그 5초
+- 파일 목록 20초
+- VPN 상태 30초, 명령 처리 중 2.5초
 
-실시간 이벤트가 추가되면 polling을 이벤트 기반 무효화로 대체해야 합니다.
+파일 변경과 VPN 연결 명령 직후에는 즉시 무효화하고, 파일 변경 명령은 1.5초 뒤 한 번 더 무효화합니다. 실시간 이벤트가 추가되면 polling을 이벤트 기반 무효화로 대체해야 합니다.
 
-### 4. Files, VPN, Diagnostics API 부재
+### 4. Diagnostics API 부재
 
-다음 화면은 라우트와 준비 중 UI만 제공합니다.
-
-- `/m/:machineId/files/*`
-- `/m/:machineId/vpn`
-- `/m/:machineId/diagnostics`
-
-가짜 파일 목록, VPN 상태, 진단 결과를 표시하지 않습니다. 대응 API가 추가되면 각 placeholder를 실제 화면으로 교체해야 합니다.
+`/m/:machineId/diagnostics` 화면은 라우트와 준비 중 UI만 제공합니다. 가짜 진단 결과를 표시하지 않으며, 대응 API가 추가되면 placeholder를 실제 화면으로 교체해야 합니다. Files와 VPN은 전용 API가 제공되어 실제 화면을 사용합니다.
 
 ### 5. 클라이언트 로그와 Diff API 부재
 
@@ -133,8 +129,58 @@ M4 구현의 cursor는 oldest offset을 전진시키는 방식이므로 “최�
 - `health`
 - `vpn`
 
-프론트엔드는 인스턴스와 기능을 별도 API로 조회합니다. health/workspace/VPN 상세 패널은 데이터가 없으므로 표시하지 않습니다. 텔레메트리 API가 추가되면 Settings/Diagnostics 화면에서 사용할 수 있습니다.
+프론트엔드는 인스턴스, 기능, 워크스페이스, VPN을 전용 API로 조회합니다. `/machines` 응답의 해당 필드는 사용하지 않습니다. health 상세 패널은 데이터가 없으므로 표시하지 않으며, 텔레메트리 API가 추가되면 Settings/Diagnostics 화면에서 사용할 수 있습니다.
 
 ### 10. 서버 로그가 비어 있을 수 있음
 
 개발 환경이나 로그 파일이 아직 생성되지 않은 환경에서는 `/api/v1/logs/server`가 빈 목록을 반환할 수 있습니다. 로그 화면은 이 경우 “로그 파일이 없습니다” 빈 상태를 표시하며, 오류로 처리하지 않습니다.
+
+### 11. Files API 제약
+
+Files 화면은 다음 API를 사용합니다.
+
+- `GET /api/v1/machines/{machineId}/workspaces`
+- `GET /api/v1/machines/{machineId}/workspaces/{workspaceId}/files`
+- `GET /api/v1/machines/{machineId}/workspaces/{workspaceId}/files/preview`
+- `POST /api/v1/machines/{machineId}/workspaces/{workspaceId}/files/mkdir`
+- `POST /api/v1/machines/{machineId}/workspaces/{workspaceId}/files/delete`
+- `POST /api/v1/machines/{machineId}/workspaces/{workspaceId}/files/rename`
+- `POST /api/v1/machines/{machineId}/workspaces/{workspaceId}/transfers/uploads`
+- `PUT /api/v1/machines/{machineId}/transfers/{transferId}/chunks/{index}`
+- `POST /api/v1/machines/{machineId}/transfers/{transferId}/complete`
+- `GET /api/v1/machines/{machineId}/transfers/{transferId}`
+- `POST /api/v1/machines/{machineId}/workspaces/{workspaceId}/transfers/downloads`
+- `GET /api/v1/machines/{machineId}/transfers/{transferId}/content`
+
+제약과 현재 처리 방식은 다음과 같습니다.
+
+- 목록은 cursor 기반이며 20초마다 polling합니다. 목록이 여러 페이지면 “더 불러오기”로 이어서 조회합니다. 실시간 갱신은 없습니다.
+- `allowMkdir`, `allowDelete`, `allowUpload`, `allowDownload`는 서버가 제공하는 권한 표시입니다. UI는 이 값으로 버튼을 숨기지만 최종 검증은 서버가 수행합니다.
+- 업로드는 파일 1개 단위입니다. 폴더 업로드, 다중 선택, 드래그 앤 드롭, 새로고침 후 재개를 지원하지 않습니다.
+- 업로드 진행률은 브라우저가 전송한 chunk 기준입니다. 서버가 제공하는 전송 진행률 이벤트는 없습니다.
+- `complete` 후 최대 약 10초 동안 전송 상태를 polling합니다. `completed`가 아니어도 `failed`/`expired`가 아니면 요청 성공으로 처리하므로, 실제 파일 반영은 목록 새로고침으로 확인해야 합니다.
+- 업로드 파일의 `sha256`은 프론트엔드에서 계산하거나 검증하지 않습니다.
+- 다운로드는 `ready`가 될 때까지 최대 약 60초 기다린 뒤 `/content` URL로 이동합니다. 다운로드 진행률은 표시하지 않으며, content는 서버 TTL 안에서만 유효합니다.
+- 디렉터리 다운로드는 ZIP으로 요청합니다. ZIP 생성 진행률은 제공되지 않습니다.
+- 텍스트 미리보기는 서버가 반환한 일부 텍스트만 표시하며(truncated 표시), 이미지 미리보기는 서버가 base64로 반환한 경우에만 동작합니다. 바이너리는 다운로드 버튼으로 대체합니다.
+- `mkdir`, `delete`, `rename`은 `202 pending` 명령으로 접수될 수 있습니다. Files 화면은 명령 완료를 추적하지 않고 즉시 목록을 무효화한 뒤 1.5초 후 한 번 더 무효화합니다.
+- 파일 생성·편집, 숨김 토글, 권한 변경, 파일 검색은 제공하지 않습니다.
+
+### 12. VPN API 제약
+
+VPN 화면은 다음 API를 사용합니다.
+
+- `GET /api/v1/machines/{machineId}/vpn/page?country={code}&prevCity={city}`
+- `POST /api/v1/machines/{machineId}/vpn/connect`
+- `POST /api/v1/machines/{machineId}/vpn/disconnect`
+- `GET /api/v1/commands/{commandId}` (명령 완료 추적)
+
+제약과 현재 처리 방식은 다음과 같습니다.
+
+- 연결/해제는 비동기 명령입니다. 화면은 명령을 1초 간격으로 polling하고 최대 60초 후 결과 확인을 중단합니다. 중단 후에는 VPN 상태 새로고침으로 실제 연결 상태를 확인해야 합니다.
+- VPN 상태는 30초, `busyOperation`/`busyCommandId`가 있으면 2.5초 간격으로 polling합니다.
+- 서버 목록은 `/vpn/page` 응답의 캐시된 스냅샷을 사용합니다. 화면의 새로고침은 같은 스냅샷 API를 다시 호출할 뿐, 서버 목록 강제 갱신 API는 호출하지 않습니다.
+- 국가를 바꾸면 도시와 서버 선택이 초기화됩니다. 도시를 선택하지 않으면 서버가 제안한 도시 또는 자동 선택을 사용합니다.
+- `force`는 현재 연결을 강제로 교체할지 여부만 전달합니다.
+- CLI 미탐지, Helper 미가용, ProtonVPN 미로그인, ProtonVPN GUI 실행 중 상태는 경고로 표시하며 연결 버튼을 제한합니다.
+- 분할 터널링, 프로토콜 선택, kill switch, 자동 재연결, 서버 목록 새로고침 주기 설정은 제공하지 않습니다.

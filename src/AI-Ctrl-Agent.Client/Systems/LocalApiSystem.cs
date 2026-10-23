@@ -52,6 +52,8 @@ public sealed class LocalApiSystem : IAcSystem
 
     private readonly TimeProvider _time;
 
+    private readonly Func<bool>? _serverLinkConnected;
+
     private readonly ILogger<LocalApiSystem> _logger;
 
     private WebApplication? _app;
@@ -69,7 +71,8 @@ public sealed class LocalApiSystem : IAcSystem
         FilesSystem files,
         LocalApiOptions options,
         TimeProvider time,
-        ILoggerFactory logs)
+        ILoggerFactory logs,
+        Func<bool>? serverLinkConnected = null)
     {
         ArgumentNullException.ThrowIfNull(commands);
         ArgumentNullException.ThrowIfNull(registry);
@@ -85,6 +88,7 @@ public sealed class LocalApiSystem : IAcSystem
         _options = options;
         _tokens = new LocalTokenStore(options.TokenPath);
         _time = time;
+        _serverLinkConnected = serverLinkConnected;
         _logger = logs.CreateLogger<LocalApiSystem>();
         _port = options.Port;
     }
@@ -204,7 +208,7 @@ public sealed class LocalApiSystem : IAcSystem
                 var status = new LocalStatusDto(
                     _registry.MachineId,
                     Version,
-                    ServerConnected: false,
+                    ServerConnected: _serverLinkConnected?.Invoke() ?? false,
                     _port,
                     _registry.Instances.Count,
                     _state.GetSnapshots().Count);

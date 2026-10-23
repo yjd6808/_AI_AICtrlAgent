@@ -55,8 +55,8 @@ MSW는 개발 모드에서만 동작합니다. 프로덕션 빌드에는 mock �
 | `/m/:machineId/agents/:instanceId` | 선택한 인스턴스의 세션 목록 |
 | `/m/:machineId/agents/:instanceId/sessions/:sessionId` | 세션 대화와 프롬프트 |
 | `/m/:machineId/logs` | 서버 로그 |
-| `/m/:machineId/files/*` | Files 준비 중 안내 |
-| `/m/:machineId/vpn` | VPN 준비 중 안내 |
+| `/m/:machineId/files/*` | 워크스페이스 파일 탐색·미리보기·업로드·다운로드 |
+| `/m/:machineId/vpn` | VPN 상태와 서버 선택·연결·해제 |
 | `/m/:machineId/diagnostics` | Diagnostics 준비 중 안내 |
 
 정의되지 않은 경로는 `NotFoundPage`로 처리됩니다.
@@ -68,7 +68,7 @@ src/
   api/          REST 클라이언트, 타입, React Query 훅, 포맷 유틸리티
   app/          앱 셸, 인증 가드, 라우팅, 기능 경로 계산
   components/   버튼, 배지, 토스트, 오류/로딩 상태 등 공용 UI
-  features/     agents, session, activity, commands, logs, settings, placeholder
+  features/     agents, session, files, vpn, activity, commands, logs, settings, placeholder
   flux/         Zustand 기반 UI 상태와 대기 중 프롬프트 상태
   lib/          공용 유틸리티
   mocks/        MSW 핸들러, fixture, 브라우저/테스트 서버
@@ -95,6 +95,7 @@ src/
 
 - 서버 상태는 TanStack Query가 관리합니다.
 - 머신 10초, 인스턴스/기능 15초, 세션 5초, 메시지 2초, 감사 로그 15초, 서버 로그 5초 간격으로 갱신합니다.
+- 파일 목록은 20초, VPN 상태는 30초(명령 처리 중 2.5초) 간격으로 갱신합니다.
 - 진행 중인 명령은 1초, 종료된 명령 목록은 5초 간격으로 갱신합니다.
 - UI 선택값, 마지막 머신, 세션 트리 확장 상태, 대기 중 프롬프트는 Zustand가 관리합니다.
 - 실시간 push API가 없으므로 화면 갱신은 polling을 사용합니다.
@@ -107,6 +108,15 @@ src/
 - 관리형이 아닌 인스턴스는 읽기 전용입니다.
 - 오프라인 머신에서는 캐시된 대화를 읽을 수 있지만 프롬프트를 전송할 수 없습니다.
 - 자식 세션은 기본적으로 접히며, 부모 세션을 확장하면 표시됩니다.
+
+## 파일과 VPN 규칙
+
+- 파일 작업 버튼은 워크스페이스의 `allowMkdir`, `allowDelete`, `allowUpload`, `allowDownload` 값으로 표시합니다. 최종 권한 검사는 서버가 수행합니다.
+- 업로드는 파일 1개 단위이며 충돌 정책(`fail`, `rename`, `overwrite`)을 선택할 수 있습니다. 업로드 완료 후 실제 파일 반영은 목록 새로고침으로 확인합니다.
+- `mkdir`, `delete`, `rename`이 `202 pending`을 반환하면 명령 접수로 표시하고, 목록을 즉시 갱신한 뒤 1.5초 후 다시 갱신합니다.
+- 다운로드는 서버가 `ready` 상태를 반환한 뒤 content URL로 이동합니다. content는 서버 TTL 안에서만 유효합니다.
+- VPN 연결/해제는 비동기 명령이며 최대 60초 동안 결과를 추적합니다. 처리 중에는 연결 관련 버튼을 비활성화합니다.
+- VPN 서버 목록은 `/vpn/page`의 캐시된 스냅샷을 사용하며, 국가를 바꾸면 도시와 서버 선택이 초기화됩니다.
 
 ## 보안
 
@@ -136,6 +146,10 @@ npm run test
 - 프롬프트 202 응답부터 명령 성공까지의 polling 흐름
 - 머신 목록 서버 오류 상태
 - 명령 이력 렌더링
+- 파일 목록 탐색과 텍스트 미리보기
+- Files 도구 모음의 폴더 생성과 명령 접수
+- 파일 업로드와 목록 반영
+- VPN 연결 해제와 재연결 명령 추적
 
 ## 빌드와 배포
 
@@ -149,4 +163,4 @@ npm run build
 
 ## 알려진 API 제약
 
-M4에 아직 없거나 프론트엔드에서 안전하게 사용할 수 없는 API는 `API-GAPS.md`에 정리되어 있습니다. 대표적으로 세션 생성, 권한 요청 상세, Files/VPN/Diagnostics, 실시간 push, 클라이언트 로그, diff가 없습니다.
+M4에 아직 없거나 프론트엔드에서 안전하게 사용할 수 없는 API는 `API-GAPS.md`에 정리되어 있습니다. 대표적으로 세션 생성, 권한 요청 상세, Diagnostics, 실시간 push, 클라이언트 로그, diff가 없습니다. Files와 VPN은 사용 가능하지만 업로드 재개, 서버 목록 강제 갱신 등 일부 제약이 있습니다.
