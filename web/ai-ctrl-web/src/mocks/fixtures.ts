@@ -308,7 +308,7 @@ function seedCommand(
       result,
       errorCode: error?.code ?? null,
       errorMessage: error?.message ?? null,
-      issuedBy: 'jdyun@example.com',
+      issuedBy: 'operator@example.com',
       issuedAt: new Date(at).toISOString(),
       updatedAt: new Date(at + 4_000).toISOString(),
       steps: [
@@ -555,7 +555,7 @@ function seedVpn(now: number): MockVpnState {
     helperAvailable: true,
     protonGuiRunning: false,
     signedIn: true,
-    username: 'jdyun@example.com',
+    username: 'operator@example.com',
     expiresAt: new Date(now + 18 * 24 * hour).toISOString(),
     tunnelUp: true,
     server: 'JP#2',
@@ -802,7 +802,7 @@ export function createMockState(): MockState {
     {
       id: 5,
       at: new Date(now - 8 * minute).toISOString(),
-      actor: 'jdyun@example.com',
+      actor: 'operator@example.com',
       ip: '203.0.113.24',
       country: 'KR',
       action: 'session.prompt',
@@ -813,7 +813,7 @@ export function createMockState(): MockState {
     {
       id: 4,
       at: new Date(now - 24 * minute).toISOString(),
-      actor: 'jdyun@example.com',
+      actor: 'operator@example.com',
       ip: '203.0.113.24',
       country: 'KR',
       action: 'machine.instances.refresh',
@@ -824,7 +824,7 @@ export function createMockState(): MockState {
     {
       id: 3,
       at: new Date(now - 47 * minute).toISOString(),
-      actor: 'jdyun@example.com',
+      actor: 'operator@example.com',
       ip: '203.0.113.24',
       country: 'KR',
       action: 'session.abort',
@@ -846,7 +846,7 @@ export function createMockState(): MockState {
     {
       id: 1,
       at: new Date(now - 28 * hour).toISOString(),
-      actor: 'jdyun@example.com',
+      actor: 'operator@example.com',
       ip: '203.0.113.24',
       country: 'KR',
       action: 'auth.login',
@@ -1071,7 +1071,7 @@ export function advanceCommand(state: MockState, command: MockCommand): void {
   state.audit.unshift({
     id: state.audit.length + 1,
     at: new Date(now).toISOString(),
-    actor: 'jdyun@example.com',
+    actor: 'operator@example.com',
     ip: '203.0.113.24',
     country: 'KR',
     action: command.detail.type,

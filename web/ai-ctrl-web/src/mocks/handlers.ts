@@ -212,7 +212,7 @@ function startCommand(
       result: null,
       errorCode: null,
       errorMessage: null,
-      issuedBy: 'jdyun@example.com',
+      issuedBy: 'operator@example.com',
       issuedAt: new Date(now).toISOString(),
       updatedAt: new Date(now).toISOString(),
       steps: [
@@ -978,8 +978,8 @@ const vpnHandlers = [
 export const handlers = [
   http.get(`${API}/auth/me`, () =>
     HttpResponse.json({
-      email: 'jdyun@example.com',
-      name: 'JD Yun',
+      email: 'operator@example.com',
+      name: 'Test Operator',
       authTime: new Date(Date.now() - 42 * 60_000).toISOString(),
     }),
   ),

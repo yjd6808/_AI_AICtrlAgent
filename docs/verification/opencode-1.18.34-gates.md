@@ -225,7 +225,7 @@ Server의 UI watch 집계와 Client의 `StreamSystem`을 연결해, UI가 구독
 | 모델 | `opencode/deepseek-v4.1-flash-free` |
 | 응답 | `AICTRL_E2E_RESTART_OK` |
 | Client 상태 | `serverConnected=true`, `instanceCount=1` |
-| 관리 실행 | `opencode` → `C:\Users\jdyun\AppData\Roaming\npm\opencode.cmd` → `cmd.exe /d /s /c` → `opencode.exe serve` |
+| 관리 실행 | `opencode` → `C:\Users\<user>\AppData\Roaming\npm\opencode.cmd` → `cmd.exe /d /s /c` → `opencode.exe serve` |
 
 - `prompt_async`의 `messageID`는 `msg`로 시작해야 한다. 기존 Client는 `CommandSystem`의 `CommandId`를 그대로 넘겨 400을 받았고, `OpenCodeInstance`에서 `msg_` 접두사를 보정하도록 수정했다. Fake 서버도 같은 규칙으로 400을 반환해 회귀를 재현한다.
 - `OpenCodeProviderTests.Prompt_normalizes_command_id_to_message_id`를 추가했다. 전체 `dotnet test`는 `423 통과, 1 skip, 424 total`, 빌드는 경고 0/오류 0이다.
