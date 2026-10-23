@@ -22,6 +22,8 @@ public static class CommandTypes
 
     public const string VpnDisconnect = "vpn.disconnect";
 
+    public const string VpnPolicySet = "vpn.policy.set";
+
     public const string FilesReceive = "files.receive";
 
     public const string FilesSend = "files.send";

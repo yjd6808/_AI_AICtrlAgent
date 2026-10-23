@@ -315,7 +315,7 @@ public sealed class MonitorSystem : IAcSystem
         if (retry is not null)
         {
             var classified = _classifier.ClassifyRetry(retryReason, retry.Message);
-            if (classified.Class is ErrorClass.QuotaExceeded or ErrorClass.RateLimited)
+            if (classified.Class is ErrorClass.QuotaExceeded or ErrorClass.RateLimited or ErrorClass.Network)
             {
                 _aiOutput.Error(sessionRef, classified);
                 await PublishAsync(
@@ -325,6 +325,7 @@ public sealed class MonitorSystem : IAcSystem
                         OccurredAt = now,
                         Session = sessionRef,
                         Error = classified,
+                        Retry = retry,
                     },
                     ct).ConfigureAwait(false);
             }

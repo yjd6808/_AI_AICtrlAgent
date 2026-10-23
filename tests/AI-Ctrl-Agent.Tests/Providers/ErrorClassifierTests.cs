@@ -12,6 +12,7 @@ public sealed class ErrorClassifierTests
     [InlineData("MessageAbortedError", "Aborted", null, ErrorClass.Aborted)]
     [InlineData("UnknownError", "quota exhausted", 402, ErrorClass.QuotaExceeded)]
     [InlineData("UnknownError", "Free usage limit reached", null, ErrorClass.QuotaExceeded)]
+    [InlineData("UnknownError", "Free usage exceeded. Subscribe to Go for more.", null, ErrorClass.QuotaExceeded)]
     [InlineData("UnknownError", "rate limit exceeded", 429, ErrorClass.RateLimited)]
     [InlineData("UnknownError", "too many requests", null, ErrorClass.RateLimited)]
     [InlineData("UnknownError", "unauthorized", 401, ErrorClass.AuthFailed)]
@@ -20,6 +21,7 @@ public sealed class ErrorClassifierTests
     [InlineData("UnknownError", "model overloaded", 503, ErrorClass.ModelUnavailable)]
     [InlineData("UnknownError", "fetch failed", null, ErrorClass.Network)]
     [InlineData("UnknownError", "connect ECONNREFUSED 127.0.0.1:4096", null, ErrorClass.Network)]
+    [InlineData("UnknownError", "request timed out after 30s", null, ErrorClass.Network)]
     [InlineData("UnknownError", "something odd", null, ErrorClass.Unknown)]
     public void Classify_maps_error_signals(string name, string message, int? statusCode, ErrorClass expected)
     {

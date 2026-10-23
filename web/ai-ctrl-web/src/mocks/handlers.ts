@@ -9,6 +9,7 @@ import type {
   TransferStatusView,
   UploadConflict,
   VpnConnectInput,
+  VpnPolicyUpdateInput,
   VpnServerRow,
 } from '../api/types'
 import {
@@ -157,6 +158,14 @@ function allVpnRows(vpn: MockVpnState): VpnServerRow[] {
   return Object.values(vpn.pages).flatMap((page) =>
     page.cities.flatMap((city) => city.servers),
   )
+}
+
+function boundedInt(value: number, min: number, max: number, fallback: number): number {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) {
+    return fallback
+  }
+  return Math.max(min, Math.min(max, Math.trunc(parsed)))
 }
 
 function applyConnectedRow(vpn: MockVpnState, target: VpnServerRow): void {
@@ -750,6 +759,76 @@ const workspaceHandlers = [
 ]
 
 const vpnHandlers = [
+  http.get(`${API}/machines/:machineId/vpn/policy`, ({ params }) => {
+    const state = getMockState()
+    const machineId = String(params.machineId)
+    const vpn = vpnStateOf(state, machineId)
+    if (!vpn) {
+      return problem(503, 'vpn_not_available', 'VPN을 사용할 수 없습니다', machineId)
+    }
+    vpn.policy.currentServer = vpn.status.server
+    return HttpResponse.json(envelope(state, vpn.policy, machineId))
+  }),
+
+  http.put(
+    `${API}/machines/:machineId/vpn/policy`,
+    async ({ params, request }) => {
+      const state = getMockState()
+      const machineId = String(params.machineId)
+      const vpn = vpnStateOf(state, machineId)
+      if (!vpn) {
+        return problem(503, 'vpn_not_available', 'VPN을 사용할 수 없습니다', machineId)
+      }
+      const body = (await request.json().catch(() => ({}))) as VpnPolicyUpdateInput
+      const requestId = requestIdOf(request)
+      const now = new Date().toISOString()
+      const minLoad = boundedInt(body.minLoad, 0, 100, vpn.policy.minLoad)
+      vpn.policy = {
+        ...vpn.policy,
+        enabled: Boolean(body.enabled),
+        minLoad,
+        maxLoad: boundedInt(body.maxLoad, minLoad, 100, vpn.policy.maxLoad),
+        excludeUsedWithinHours: boundedInt(
+          body.excludeUsedWithinHours,
+          0,
+          24 * 365,
+          vpn.policy.excludeUsedWithinHours,
+        ),
+        maxAttemptsPerSession: boundedInt(
+          body.maxAttemptsPerSession,
+          1,
+          5,
+          vpn.policy.maxAttemptsPerSession,
+        ),
+        retryWaitThresholdSeconds: boundedInt(
+          body.retryWaitThresholdSeconds,
+          1,
+          24 * 60 * 60,
+          vpn.policy.retryWaitThresholdSeconds,
+        ),
+        countries: Array.isArray(body.countries)
+          ? body.countries
+              .map((value) => String(value).trim().toUpperCase())
+              .filter(Boolean)
+          : vpn.policy.countries,
+        currentServer: vpn.status.server,
+        updatedAt: now,
+      }
+      const command = startCommand(
+        state,
+        requestId,
+        machineId,
+        'vpn.policy.set',
+        'vpn',
+        null,
+        null,
+        'succeeded',
+        700,
+      )
+      return HttpResponse.json(envelope(state, pending(command), machineId), { status: 202 })
+    },
+  ),
+
   http.get(`${API}/machines/:machineId/vpn/page`, ({ params, request }) => {
     const state = getMockState()
     const machineId = String(params.machineId)

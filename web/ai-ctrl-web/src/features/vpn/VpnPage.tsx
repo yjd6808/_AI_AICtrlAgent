@@ -31,6 +31,7 @@ import { PageHeader } from '../../components/PageHeader'
 import { EmptyBlock, ErrorBlock, LoadingBlock } from '../../components/AsyncState'
 import { useToast } from '../../components/Toast'
 import { cx } from '../../lib/cx'
+import { VpnPolicyPanel } from './VpnPolicyPanel'
 import styles from './VpnPage.module.css'
 
 const rowStateLabels: Record<VpnRowState, string> = {
@@ -273,6 +274,8 @@ export function VpnPage() {
           VPN 상태를 새로고침해 실제 연결 상태를 확인하세요.
         </InlineNotice>
       ) : null}
+
+      <VpnPolicyPanel machineId={machineId} />
 
       <div className={styles.topGrid}>
         <section className={cx(styles.statusPanel, status.tunnelUp && styles.statusPanelUp)}>

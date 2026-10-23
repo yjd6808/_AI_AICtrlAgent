@@ -14,7 +14,7 @@
 | 권한 응답 | 응답 엔드포인트는 있으나 요청 상세 없음 | 승인/거부 UI 숨김 | `WaitingPermission`은 중단 또는 중단 후 전송만 가능 |
 | 실시간 push | 브라우저용 채널 없음 | React Query polling | 최대 polling 간격만큼 지연 |
 | Files | 조회/변경/전송 API 제공 | 실제 화면 | 진행률·재개 등 일부 제약 있음 |
-| VPN | 상태/서버/연결 API 제공 | 실제 화면 | 서버 목록 강제 갱신 UI 없음 |
+| VPN | 상태/서버/연결·정책 API 제공 | 실제 화면 | 서버 목록 강제 갱신 UI 없음, 정책 저장은 command 접수 |
 | Diagnostics | API 없음 | 준비 중 화면 | 진단 정보 수집 불가 |
 | 클라이언트 로그 | 수집/조회 API 없음 | 서버 전역 로그만 표시 | 머신·세션별 Client 로그 확인 불가 |
 | Diff | API 없음 | Diff 뷰어 없음 | 변경 파일 비교 불가 |
@@ -171,6 +171,8 @@ Files 화면은 다음 API를 사용합니다.
 VPN 화면은 다음 API를 사용합니다.
 
 - `GET /api/v1/machines/{machineId}/vpn/page?country={code}&prevCity={city}`
+- `GET /api/v1/machines/{machineId}/vpn/policy`
+- `PUT /api/v1/machines/{machineId}/vpn/policy`
 - `POST /api/v1/machines/{machineId}/vpn/connect`
 - `POST /api/v1/machines/{machineId}/vpn/disconnect`
 - `GET /api/v1/commands/{commandId}` (명령 완료 추적)
@@ -184,3 +186,8 @@ VPN 화면은 다음 API를 사용합니다.
 - `force`는 현재 연결을 강제로 교체할지 여부만 전달합니다.
 - CLI 미탐지, Helper 미가용, ProtonVPN 미로그인, ProtonVPN GUI 실행 중 상태는 경고로 표시하며 연결 버튼을 제한합니다.
 - 분할 터널링, 프로토콜 선택, kill switch, 자동 재연결, 서버 목록 새로고침 주기 설정은 제공하지 않습니다.
+- VPN 정책은 Client의 `%LOCALAPPDATA%\AiCtrl\vpn-policy.json`에 저장되며, Server는 `vpn.policy` query와 `vpn.policy.set` command로만 접근합니다.
+- `GET /vpn/policy`는 정책 설정과 서버별 상태(`ok`, `quota_exhausted`, `opencode_timeout`, `connect_failed`), `currentServer`, `updatedAt`을 반환합니다. 화면은 30초마다 갱신합니다.
+- `PUT /vpn/policy`는 `wait=5`로 command를 보내며 202 pending을 반환할 수 있습니다. UI는 pending이면 접수 토스트를 표시하고 정책과 VPN page query를 무효화합니다.
+- 정책의 `maxAttemptsPerSession`은 한 번의 failover에서 연결할 후보 서버 수 상한으로 동작하며 런타임에서 1~5로 제한됩니다. 복구 시스템 전체의 세션당 복구 횟수는 `vpn:recovery:maxAttemptsPerSession`이 별도로 제한합니다.
+- 수동 서버 전환은 기존 `/vpn/connect`의 `server`/`country`/`city`와 `force`를 사용합니다. 별도 switch API는 없습니다.

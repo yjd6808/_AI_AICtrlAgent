@@ -354,6 +354,11 @@ public sealed class ClientRequestHandler
                     AcJsonContext.Default.VpnServerPage);
             }
 
+            case QueryTypes.VpnPolicy:
+                return JsonSerializer.SerializeToElement(
+                    await VpnOrThrow().GetPolicyAsync(ct).ConfigureAwait(false),
+                    AcJsonContext.Default.VpnPolicyView);
+
             case QueryTypes.MachineFeatures:
                 return JsonSerializer.SerializeToElement(BuildFeatures(), AcJsonContext.Default.ListMachineFeature);
 

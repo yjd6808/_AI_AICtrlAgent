@@ -15,6 +15,7 @@ import type {
   SessionSummary,
   TransferStatusView,
   VpnCountryView,
+  VpnPolicyView,
   VpnServerPage,
   VpnServerRow,
   VpnStatusView,
@@ -260,6 +261,7 @@ export type MockVpnState = {
   status: VpnStatusView
   countries: VpnCountryView[]
   pages: Record<string, VpnServerPage>
+  policy: VpnPolicyView
 }
 
 export type MockState = {
@@ -568,7 +570,54 @@ function seedVpn(now: number): MockVpnState {
     usesProtonApp: false,
   }
 
-  return { status, countries, pages }
+  const policy: VpnPolicyView = {
+    enabled: true,
+    minLoad: 0,
+    maxLoad: 70,
+    excludeUsedWithinHours: 24,
+    maxAttemptsPerSession: 3,
+    retryWaitThresholdSeconds: 180,
+    countries: [],
+    currentServer: status.server,
+    updatedAt: new Date(now - 12 * minute).toISOString(),
+    servers: [
+      {
+        server: 'JP#2',
+        status: 'ok',
+        country: 'JP',
+        city: 'Tokyo',
+        lastUsedAt: new Date(now - 45 * minute).toISOString(),
+        availableAt: null,
+        lastExitIp: '203.0.113.8',
+        failureCount: 0,
+        lastError: null,
+      },
+      {
+        server: 'JP#1',
+        status: 'quota_exhausted',
+        country: 'JP',
+        city: 'Tokyo',
+        lastUsedAt: new Date(now - 2 * hour).toISOString(),
+        availableAt: new Date(now + 22 * hour).toISOString(),
+        lastExitIp: '203.0.113.11',
+        failureCount: 2,
+        lastError: 'Free usage exceeded',
+      },
+      {
+        server: 'DE#1',
+        status: 'connect_failed',
+        country: 'DE',
+        city: 'Frankfurt',
+        lastUsedAt: new Date(now - 3 * 24 * hour).toISOString(),
+        availableAt: new Date(now + 21 * hour).toISOString(),
+        lastExitIp: null,
+        failureCount: 1,
+        lastError: 'The VPN tunnel did not become ready.',
+      },
+    ],
+  }
+
+  return { status, countries, pages, policy }
 }
 
 export function createMockState(): MockState {

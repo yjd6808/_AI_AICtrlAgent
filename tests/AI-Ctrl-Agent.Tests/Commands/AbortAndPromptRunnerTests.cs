@@ -138,6 +138,55 @@ public sealed class AbortAndPromptRunnerTests
         instance.Prompts.ShouldBeEmpty();
     }
 
+    [Fact]
+    public async Task Abort_only_settles_the_session_without_prompting()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var instance = new ScriptedProviderInstance();
+        instance.AddSession("ses_1", AcRunState.Busy);
+
+        var result = await CreateRunner().AbortAsync(instance, Session, "cmd_abort", ct);
+
+        result.Status.ShouldBe(CommandStatus.Succeeded);
+        instance.Aborted.ShouldBe(new[] { "ses_1" });
+        instance.Prompts.ShouldBeEmpty();
+        result.Result.ShouldNotBeNull();
+        result.Result.Value.GetProperty("abortedSessions").GetInt32().ShouldBe(1);
+        result.Result.Value.GetProperty("messageId").GetString().ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Prompt_only_prompts_a_settled_session_without_aborting()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var instance = new ScriptedProviderInstance();
+        instance.AddSession("ses_1", AcRunState.Idle);
+
+        var result = await CreateRunner().PromptAsync(instance, Payload("hello"), "cmd_prompt", ct);
+
+        result.Status.ShouldBe(CommandStatus.Succeeded);
+        instance.Aborted.ShouldBeEmpty();
+        instance.Prompts.Count.ShouldBe(1);
+        instance.Prompts[0].ClientMessageId.ShouldBe("cmd_prompt");
+        result.Result.ShouldNotBeNull();
+        result.Result.Value.GetProperty("messageId").GetString().ShouldBe("cmd_prompt");
+    }
+
+    [Fact]
+    public async Task Prompt_only_rejects_a_foreign_busy_session()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var instance = new ScriptedProviderInstance();
+        instance.AddSession("ses_1", AcRunState.ForeignBusy);
+
+        var result = await CreateRunner().PromptAsync(instance, Payload("hello"), "cmd_prompt", ct);
+
+        result.Status.ShouldBe(CommandStatus.Failed);
+        result.ErrorCode.ShouldBe(AcErrorCodes.ForeignTurn);
+        instance.Aborted.ShouldBeEmpty();
+        instance.Prompts.ShouldBeEmpty();
+    }
+
     private static SessionAbortAndPromptPayload Payload(string text) => new(Session, text, null);
 
     private static AbortAndPromptRunner CreateRunner(

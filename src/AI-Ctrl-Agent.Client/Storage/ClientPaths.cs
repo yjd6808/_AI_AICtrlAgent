@@ -14,5 +14,7 @@ public static class ClientPaths
 
     public static string VpnHelperTokenPath => Path.Combine(DataDirectory, "vpn-helper.token");
 
+    public static string VpnPolicyPath => Path.Combine(DataDirectory, "vpn-policy.json");
+
     public static void EnsureDataDirectory() => Directory.CreateDirectory(DataDirectory);
 }

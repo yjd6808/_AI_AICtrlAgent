@@ -42,6 +42,10 @@ public sealed partial class VpnSystem : IAcSystem
 
     private readonly Func<bool>? _serverLinkConnected;
 
+    private readonly VpnPolicyStore? _policyStore;
+
+    private readonly SemaphoreSlim _catalogGate = new(1, 1);
+
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
 
     private readonly SemaphoreSlim _publishGate = new(1, 1);
@@ -52,6 +56,10 @@ public sealed partial class VpnSystem : IAcSystem
 
     private readonly Dictionary<string, ServerCacheEntry> _serverCache =
         new(StringComparer.OrdinalIgnoreCase);
+
+    private IReadOnlyList<VpnServer>? _catalog;
+
+    private DateTimeOffset _catalogLoadedAt;
 
     private AcSystemContext? _context;
 
@@ -76,7 +84,8 @@ public sealed partial class VpnSystem : IAcSystem
         Func<bool>? protonGuiRunning = null,
         VpnHelperClient? helper = null,
         IVpnReadinessProbe? readinessProbe = null,
-        Func<bool>? serverLinkConnected = null)
+        Func<bool>? serverLinkConnected = null,
+        VpnPolicyStore? policyStore = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(outbox);
@@ -90,6 +99,7 @@ public sealed partial class VpnSystem : IAcSystem
         _helper = helper;
         _readinessProbe = readinessProbe ?? new HttpVpnReadinessProbe();
         _serverLinkConnected = serverLinkConnected;
+        _policyStore = policyStore;
         if (cli is not null)
         {
             _cli = cli;
@@ -183,6 +193,125 @@ public sealed partial class VpnSystem : IAcSystem
         catch (CliException ex)
         {
             throw Map(ex);
+        }
+    }
+
+    public async Task<VpnPolicyView> GetPolicyAsync(CancellationToken ct)
+    {
+        var store = PolicyStoreOrThrow();
+        var status = await GetStatusAsync(ct).ConfigureAwait(false);
+        return await store
+            .GetViewAsync(status.TunnelUp ? status.Server : null, ct)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<VpnPolicyView> SetPolicyAsync(
+        VpnPolicyUpdatePayload update,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(update);
+        var store = PolicyStoreOrThrow();
+        var status = await GetStatusAsync(ct).ConfigureAwait(false);
+        return await store
+            .SaveAsync(update, status.TunnelUp ? status.Server : null, ct)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<IReadOnlyList<VpnServer>> GetServerCatalogAsync(
+        bool refresh,
+        CancellationToken ct)
+    {
+        if (!_options.Enabled)
+        {
+            throw new VpnException(AcErrorCodes.CapabilityMissing, "VPN is disabled in client configuration.");
+        }
+
+        if (!_cli.Found)
+        {
+            throw new VpnException(AcErrorCodes.CapabilityMissing, "protonvpn CLI was not found.");
+        }
+
+        var now = _time.GetUtcNow();
+        if (!refresh && _catalog is { } cached && now - _catalogLoadedAt < ServerCacheTtl)
+        {
+            return cached;
+        }
+
+        await _catalogGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            now = _time.GetUtcNow();
+            if (!refresh && _catalog is { } cachedInside && now - _catalogLoadedAt < ServerCacheTtl)
+            {
+                return cachedInside;
+            }
+
+            IReadOnlyList<VpnCountry> countries;
+            try
+            {
+                countries = await _cli.GetCountriesAsync(_options.QueryTimeout, ct).ConfigureAwait(false);
+            }
+            catch (CliException ex)
+            {
+                throw Map(ex);
+            }
+
+            var found = new List<VpnServer>();
+            var foundGate = new object();
+            var failures = 0;
+            await Parallel.ForEachAsync(
+                countries.Where(country => !string.IsNullOrWhiteSpace(country.Code)),
+                new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = 4,
+                    CancellationToken = ct,
+                },
+                async (country, token) =>
+                {
+                    try
+                    {
+                        var servers = await GetServersCachedAsync(
+                            NormalizeCountry(country.Code)!,
+                            refresh,
+                            token).ConfigureAwait(false);
+                        lock (foundGate)
+                        {
+                            found.AddRange(servers);
+                        }
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex) when (ex is VpnException or CliException)
+                    {
+                        Interlocked.Increment(ref failures);
+                        _logger.LogWarning(ex, "Could not load VPN servers for {Country}.", country.Code);
+                    }
+                }).ConfigureAwait(false);
+
+            var catalog = found
+                .Where(server => !string.IsNullOrWhiteSpace(server.Name))
+                .GroupBy(server => server.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .OrderBy(server => server.Country, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(server => server.City, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(server => server.Name, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            if (catalog.Length == 0 && failures > 0)
+            {
+                throw new VpnException(
+                    AcErrorCodes.InternalError,
+                    "Could not load any VPN servers from the ProtonVPN CLI.");
+            }
+
+            _catalog = catalog;
+            _catalogLoadedAt = _time.GetUtcNow();
+            return catalog;
+        }
+        finally
+        {
+            _catalogGate.Release();
         }
     }
 
@@ -329,6 +458,27 @@ public sealed partial class VpnSystem : IAcSystem
             {
                 await TryDisconnectForFallbackAsync().ConfigureAwait(false);
                 throw;
+            }
+
+            if (_policyStore is not null)
+            {
+                try
+                {
+                    await _policyStore.MarkUsedAsync(
+                        result.Server,
+                        NormalizeCountry(result.Country),
+                        result.City,
+                        result.ExitIp ?? Snapshot().ExitIp,
+                        ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+                {
+                    _logger.LogWarning(ex, "Could not record VPN server usage in the policy file.");
+                }
             }
 
             _history.Record(result.Server, connectedAt);
@@ -1109,6 +1259,11 @@ public sealed partial class VpnSystem : IAcSystem
         var connectedAt = result.ConnectedAt ?? DateTimeOffset.UtcNow;
         return $"연결됨: {result.Server}{location}{exitIp} · {connectedAt.ToLocalTime():HH:mm:ss}";
     }
+
+    private VpnPolicyStore PolicyStoreOrThrow() =>
+        _policyStore ?? throw new VpnException(
+            AcErrorCodes.CapabilityMissing,
+            "VPN policy is not available.");
 
     private VpnException Map(CliException exception)
     {

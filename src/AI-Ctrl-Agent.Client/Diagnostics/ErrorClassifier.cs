@@ -42,11 +42,11 @@ public sealed class ErrorClassifier
     public static readonly IReadOnlyList<ErrorRule> DefaultRules = new ErrorRule[]
     {
         new(ErrorClass.Aborted, null, "^MessageAbortedError$", null),
-        new(ErrorClass.QuotaExceeded, new[] { 402 }, null, "(?i)quota|insufficient|credit|usage limit|free tier"),
+        new(ErrorClass.QuotaExceeded, new[] { 402 }, null, "(?i)quota|insufficient|credit|usage limit|free tier|free usage|subscribe to (?:go|pro)"),
         new(ErrorClass.RateLimited, new[] { 429 }, null, "(?i)rate.?limit|too many requests"),
         new(ErrorClass.AuthFailed, new[] { 401, 403 }, null, null),
         new(ErrorClass.ModelUnavailable, new[] { 404, 503 }, null, "(?i)model", RequireAll: true),
-        new(ErrorClass.Network, null, null, "(?i)ECONN|ETIMEDOUT|fetch failed|socket"),
+        new(ErrorClass.Network, null, null, "(?i)ECONN|ETIMEDOUT|fetch failed|socket|timed? ?out|timeout"),
     };
 
     private readonly IReadOnlyList<ErrorRule> _rules;

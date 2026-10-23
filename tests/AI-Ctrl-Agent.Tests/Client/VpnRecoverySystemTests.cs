@@ -64,11 +64,32 @@ public sealed class VpnRecoverySystemTests
         var resumed = await harness.Notifier.Resumed.Task.WaitAsync(TimeSpan.FromSeconds(5), ct);
 
         resumed.Kind.ShouldBe(VpnRecoveryNoticeKind.Resumed);
+        harness.Actions.AbortCalls.ShouldBe(1);
         harness.Actions.ConnectCalls.ShouldBe(1);
         harness.Actions.ResumeCalls.ShouldBe(1);
         harness.Notifier.Kinds().ShouldContain(VpnRecoveryNoticeKind.QuotaExceeded);
         harness.Notifier.Kinds().ShouldContain(VpnRecoveryNoticeKind.VpnConnected);
         harness.Notifier.Kinds().ShouldContain(VpnRecoveryNoticeKind.Resumed);
+    }
+
+    [Fact]
+    public async Task Network_retry_event_passes_retry_info_to_actions()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var harness = await RecoveryHarness.StartAsync(
+            new VpnRecoveryOptions { Enabled = true },
+            ct);
+        var nextAt = harness.Time.GetUtcNow().AddMinutes(2);
+
+        await harness.PublishNetworkRetryAsync(nextAt, ct);
+        await harness.Notifier.Resumed.Task.WaitAsync(TimeSpan.FromSeconds(5), ct);
+
+        harness.Notifier.Kinds().ShouldContain(VpnRecoveryNoticeKind.Stalled);
+        harness.Actions.LastContext.ShouldNotBeNull();
+        harness.Actions.LastContext.ErrorClass.ShouldBe(ErrorClass.Network);
+        harness.Actions.LastContext.Retry.ShouldNotBeNull();
+        harness.Actions.LastContext.Retry.Attempt.ShouldBe(2);
+        harness.Actions.LastContext.Retry.NextAt.ShouldBe(nextAt);
     }
 
     [Fact]
@@ -84,6 +105,7 @@ public sealed class VpnRecoverySystemTests
 
         stalled.Kind.ShouldBe(VpnRecoveryNoticeKind.Stalled);
         stalled.StalledFor.ShouldBe(TimeSpan.FromMinutes(12));
+        harness.Actions.AbortCalls.ShouldBe(1);
         harness.Actions.ResumeCalls.ShouldBe(1);
     }
 
@@ -123,6 +145,7 @@ public sealed class VpnRecoverySystemTests
         var failed = await harness.Notifier.Failed.Task.WaitAsync(TimeSpan.FromSeconds(5), ct);
 
         failed.ErrorCode.ShouldBe("vpn_signin_required");
+        harness.Actions.AbortCalls.ShouldBe(1);
         harness.Actions.ResumeCalls.ShouldBe(0);
     }
 
@@ -290,6 +313,23 @@ public sealed class VpnRecoverySystemTests
                 },
                 ct);
 
+        public ValueTask PublishNetworkRetryAsync(DateTimeOffset nextAt, CancellationToken ct) =>
+            _bus.PublishAsync(
+                new SessionErrorClassifiedEvent
+                {
+                    EventId = Guid.NewGuid().ToString("N"),
+                    OccurredAt = Time.GetUtcNow(),
+                    Session = _session,
+                    Error = new ErrorInfo(
+                        ErrorClass.Network,
+                        "retry",
+                        "fetch failed",
+                        null,
+                        null),
+                    Retry = new RetryInfo(2, "fetch failed", nextAt),
+                },
+                ct);
+
         public ValueTask PublishStallAsync(TimeSpan stalledFor, CancellationToken ct) =>
             _bus.PublishAsync(
                 new SessionStalledEvent
@@ -317,13 +357,28 @@ public sealed class VpnRecoverySystemTests
             _connectResult = connectResult;
         }
 
+        public int AbortCalls { get; private set; }
+
         public int ConnectCalls { get; private set; }
 
         public int ResumeCalls { get; private set; }
 
-        public Task<VpnRecoveryActionResult> ConnectVpnAsync(CancellationToken ct)
+        public VpnRecoveryContext? LastContext { get; private set; }
+
+        public Task<VpnRecoveryActionResult> AbortSessionAsync(
+            SessionRef session,
+            CancellationToken ct)
+        {
+            AbortCalls++;
+            return Task.FromResult(VpnRecoveryActionResult.Success());
+        }
+
+        public Task<VpnRecoveryActionResult> ConnectVpnAsync(
+            VpnRecoveryContext context,
+            CancellationToken ct)
         {
             ConnectCalls++;
+            LastContext = context;
             return Task.FromResult(_connectResult);
         }
 

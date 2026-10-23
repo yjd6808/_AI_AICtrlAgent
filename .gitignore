@@ -30,7 +30,7 @@ blob-report/
 playwright/.cache/
 playwright/.auth/
 
-logs/
+/logs/
 *.log
 
 *.tmp

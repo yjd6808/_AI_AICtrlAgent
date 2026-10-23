@@ -216,6 +216,38 @@ public sealed class MonitorSystemTests
     }
 
     [Fact]
+    public async Task Retry_with_network_reason_raises_classified_error_with_retry_info()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var harness = await MonitorHarness.StartAsync(ct);
+        await using var collector = new EventCollector(harness.Bus);
+
+        harness.Instance.Emit("session.status", new Dictionary<string, object?>
+        {
+            ["sessionID"] = Session,
+            ["status"] = new Dictionary<string, object?>
+            {
+                ["type"] = "retry",
+                ["attempt"] = 3,
+                ["message"] = "fetch failed",
+                ["next"] = 1_700_000_000_000L,
+                ["action"] = new Dictionary<string, object?> { ["reason"] = "timeout" },
+            },
+        });
+
+        await RuntimeTestHelpers.WaitUntilAsync(
+            () => collector.First<SessionErrorClassifiedEvent>() is not null,
+            TimeSpan.FromSeconds(5));
+
+        var classified = collector.First<SessionErrorClassifiedEvent>()!;
+        classified.Error.Class.ShouldBe(ErrorClass.Network);
+        classified.Retry.ShouldNotBeNull();
+        classified.Retry.Attempt.ShouldBe(3);
+        classified.Retry.Message.ShouldBe("fetch failed");
+        classified.Retry.NextAt.ShouldBe(DateTimeOffset.FromUnixTimeMilliseconds(1_700_000_000_000L));
+    }
+
+    [Fact]
     public async Task Session_error_event_raises_classified_error_for_rate_limit()
     {
         var ct = TestContext.Current.CancellationToken;

@@ -362,6 +362,28 @@ public sealed class CommandSystem
                         JsonSerializer.SerializeToElement(result, AcJsonContext.Default.VpnActionSnapshot));
                 }
 
+                case CommandTypes.VpnPolicySet:
+                {
+                    var payload = JsonSerializer.Deserialize(
+                        envelope.Payload,
+                        AcJsonContext.Default.VpnPolicyUpdatePayload);
+                    if (payload is null)
+                    {
+                        return CommandResult.Failure(
+                            AcErrorCodes.InvalidPayload,
+                            "vpn.policy.set payload is required.");
+                    }
+
+                    if (_vpn is null)
+                    {
+                        return CommandResult.Failure(AcErrorCodes.CapabilityMissing, "VPN is not available.");
+                    }
+
+                    var policy = await _vpn.SetPolicyAsync(payload, ct).ConfigureAwait(false);
+                    return CommandResult.Success(
+                        JsonSerializer.SerializeToElement(policy, AcJsonContext.Default.VpnPolicyView));
+                }
+
                 case CommandTypes.FilesMkdir:
                 {
                     var payload = JsonSerializer.Deserialize(envelope.Payload, AcJsonContext.Default.FilesMkdirPayload);

@@ -431,3 +431,44 @@ export type VpnConnectInput = {
   city?: string
   force?: boolean
 }
+
+export type VpnServerStatus =
+  | 'ok'
+  | 'quota_exhausted'
+  | 'opencode_timeout'
+  | 'connect_failed'
+
+export type VpnServerPolicyStateView = {
+  server: string
+  status: VpnServerStatus
+  country: string | null
+  city: string | null
+  lastUsedAt: Iso | null
+  availableAt: Iso | null
+  lastExitIp: string | null
+  failureCount: number
+  lastError: string | null
+}
+
+export type VpnPolicyView = {
+  enabled: boolean
+  minLoad: number
+  maxLoad: number
+  excludeUsedWithinHours: number
+  maxAttemptsPerSession: number
+  retryWaitThresholdSeconds: number
+  countries: string[]
+  currentServer: string | null
+  updatedAt: Iso
+  servers: VpnServerPolicyStateView[]
+}
+
+export type VpnPolicyUpdateInput = {
+  enabled: boolean
+  minLoad: number
+  maxLoad: number
+  excludeUsedWithinHours: number
+  maxAttemptsPerSession: number
+  retryWaitThresholdSeconds: number
+  countries: string[]
+}

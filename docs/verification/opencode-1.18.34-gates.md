@@ -267,3 +267,27 @@ Server의 UI watch 집계와 Client의 `StreamSystem`을 연결해, UI가 구독
 - 회귀 테스트 `AuthEndpointTests.Api_returns_401_problem_for_unauthenticated_requests`가 `/api/v1/auth/me`와 `/api/v1/machines`의 401 problem 응답을 검증한다.
 - 검증: `dotnet build` 경고 0/오류 0, `dotnet test` 429 통과·1 skip·430 total. 실제 서버에서 두 경로 모두 `401 Unauthorized` + `application/problem+json`을 반환했고, 브라우저는 `/index.html`에서 `/login`으로 이동해 `원격 제어 콘솔`과 `Google로 로그인` 링크를 표시했다.
 - 실제 Google 계정 로그인과 로그인 후 UI E2E는 아직 수행하지 않았다. `__Host-aictrl` 쿠키의 `SecurePolicy.Always`가 로컬 HTTP에서 어떻게 동작하는지도 로그인 후 확인해야 한다. 테스트용 인증 우회는 추가하지 않는다.
+
+## M9 VPN failover policy (2026-10-23)
+
+OpenCode 할당량 소진·응답 시간 초과 시 현재 턴을 중단하고, 정책에 맞는 ProtonVPN 서버로 전환한 뒤 같은 세션을 재개하는 failover 경로를 구현했다. 정책은 Client가 소유하고 UI는 Server API를 통해 조회·수정한다. 백엔드 테스트는 `447 통과·1 skip·448 total`, 프론트엔드 테스트는 `29/29 통과`다. 실제 VPN disconnect/connect와 실제 OpenCode E2E는 수행하지 않았다.
+
+| 파일 | 검증 내용 |
+|---|---|
+| `VpnPolicyTests` | 정책 기본값·정규화·원자적 저장, 손상 파일 fallback, 후보 필터·정렬, 쿨다운 만료 후 재시도, 재시도/quota/timeout 파싱, 상태 갱신 |
+| `VpnSystemTests` | 서버 카탈로그 캐시와 새로고침, connect 후 정책 사용 기록·현재 서버 노출 |
+| `VpnRecoverySystemTests` | abort→connect→resume 순서, Network retry의 `RetryInfo` 전달, stall·attempt limit·connect failure 처리 |
+| `AbortAndPromptRunnerTests` | abort 전용, prompt 전용, foreign busy 거부 |
+| `MonitorSystemTests` | quota·rate limit·Network retry 이벤트의 `SessionErrorClassifiedEvent` 발행과 `Retry` 보존 |
+| `RequestPipelineTests` | `vpn.policy` live query, `vpn.policy.set` command dispatch |
+| `ErrorClassifierTests` | `free usage`, `subscribe to Go`, timeout 패턴 분류 |
+| `app.integration.test.tsx` | VPN 정책 로드·저장, 정책 저장 command 접수와 mock 상태 반영 |
+
+- 정책 파일은 `%LOCALAPPDATA%\AiCtrl\vpn-policy.json`이며 `temp` 파일 + `File.Move(overwrite: true)`로 원자적으로 교체한다. 파일이 없거나 손상되면 기본값 `enabled=true`, `minLoad=0`, `maxLoad=70`, `excludeUsedWithinHours=24`, `maxAttemptsPerSession=3`, `retryWaitThresholdSeconds=180`, `countries=[]`을 사용한다.
+- 서버 상태는 `ok`, `quota_exhausted`, `opencode_timeout`, `connect_failed` 네 가지다. 후보는 허용 국가, 부하 범위, 최근 사용 제외 시간, 현재 서버 제외 조건을 만족해야 하며, 실패 상태는 `availableAt` 쿨다운이 지나기 전까지 제외한다. 쿨다운이 지나면 같은 서버를 다시 후보로 사용할 수 있다. 정렬은 부하 오름차순, 점수 내림차순, 동점 시 무작위다.
+- 재시도 대기열은 `RetryInfo.NextAt`을 우선 사용하고, 없으면 메시지의 `재시도 중 N초 후`·`retry in N seconds`를 파싱한다. 대기 시간이 `retryWaitThresholdSeconds`보다 짧으면 같은 서버에서 대기 후 재개하고, 길거나 알 수 없으면 해당 서버를 쿨다운 처리하고 다른 서버를 선택한다.
+- 복구 순서는 `AbortSessionAsync` → 정책 확인 → 필요 시 VPN 전환 → `PromptAsync`다. 전환 시 `force=true`로 연결하고 `status --json`의 터널 상태·서버 ID·출구 IP를 검증한다. 서버를 바꿨는데 출구 IP가 그대로면 연결 실패로 처리한다.
+- 연결 실패 서버는 `connect_failed`와 24시간 쿨다운을 기록하고 다음 후보로 넘어간다. 한 번의 failover에서 후보 시도 횟수는 정책 값을 1~5로 clamp하며, 복구 시스템 전체의 세션당 복구 횟수는 기존 `vpn:recovery:maxAttemptsPerSession`(기본 3)이 별도로 제한한다.
+- 프로토콜은 query `vpn.policy`, command `vpn.policy.set`이고 REST는 `GET`/`PUT /api/v1/machines/{machineId}/vpn/policy`다. UI는 정책을 30초마다 갱신하고, 저장 시 `PUT` + `wait=5`로 command를 보낸다. 202 pending이면 접수 토스트를 표시하고 정책·VPN page query를 무효화한다.
+- 수동 서버 전환은 기존 `POST /vpn/connect`와 `force`를 그대로 사용한다. 별도 `/vpn/switch` endpoint는 추가하지 않았다.
+- 한계: 실제 ProtonVPN connect/disconnect와 실제 OpenCode quota/timeout E2E는 검증하지 않았다. 분할 터널링, 프로토콜 선택, kill switch는 failover 정책 범위가 아니다. `maxAttemptsPerSession`은 현재 한 번의 전환에서 후보 서버 시도 횟수로 동작하며, UI 문구도 `전환당 후보 시도`로 맞췄다.

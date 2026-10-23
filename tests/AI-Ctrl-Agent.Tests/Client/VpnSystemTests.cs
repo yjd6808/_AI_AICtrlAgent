@@ -540,6 +540,71 @@ public sealed class VpnSystemTests
         page.Cities[0].Servers[0].RowState.ShouldBe(VpnRowState.Connected);
     }
 
+    [Fact]
+    public async Task Catalog_loads_all_countries_and_caches_until_refreshed()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var serverRequests = 0;
+        ProcessResult Servers()
+        {
+            serverRequests++;
+            return CliResult(ServersJson);
+        }
+
+        await using var harness = await VpnHarness.StartAsync(
+            args => args switch
+            {
+                "countries --json" => CliResult(CountriesJson),
+                "servers --country JP --json --limit 2000" => Servers(),
+                _ => throw new InvalidOperationException(args),
+            });
+
+        var first = await harness.System.GetServerCatalogAsync(refresh: false, ct);
+        var second = await harness.System.GetServerCatalogAsync(refresh: false, ct);
+        var refreshed = await harness.System.GetServerCatalogAsync(refresh: true, ct);
+
+        first.Select(server => server.Name).ShouldBe(new[] { "JP#1", "JP#2" });
+        second.Select(server => server.Name).ShouldBe(first.Select(server => server.Name));
+        refreshed.Count.ShouldBe(2);
+        serverRequests.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task Connect_records_policy_usage_and_exposes_current_server()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var statusRequests = 0;
+        await using var harness = await VpnHarness.StartAsync(
+            args => args switch
+            {
+                "status --json" => CliResult(StatusJson(
+                    tunnel: statusRequests++ > 0,
+                    server: "JP#2",
+                    city: "Tokyo")),
+                "countries --json" => CliResult(CountriesJson),
+                "servers --country JP --json --limit 2000" => CliResult(ServersJson),
+                "connect JP#2 --json --yes" => CliResult(ConnectJson),
+                _ => throw new InvalidOperationException(args),
+            });
+
+        await harness.System.ConnectAsync(
+            new VpnConnectPayload(null, "JP", "Tokyo"),
+            "cmd_policy",
+            ct);
+
+        var document = await harness.Policy.GetAsync(ct);
+        var state = document.Servers["JP#2"];
+        state.Status.ShouldBe(VpnServerStatuses.Ok);
+        state.Country.ShouldBe("JP");
+        state.City.ShouldBe("Tokyo");
+        state.LastExitIp.ShouldBe("203.0.113.8");
+        state.FailureCount.ShouldBe(0);
+        state.LastUsedAt.ShouldNotBeNull();
+
+        var policy = await harness.System.GetPolicyAsync(ct);
+        policy.CurrentServer.ShouldBe("JP#2");
+    }
+
     private static VpnStatusView Status(bool tunnel, string server, string country, string city) =>
         new(
             true,
@@ -604,6 +669,7 @@ public sealed class VpnSystemTests
             OutboxStore outbox,
             ScriptedCli cli,
             ConnectionHistory history,
+            VpnPolicyStore policy,
             VpnSystem system)
         {
             _directory = directory;
@@ -611,6 +677,7 @@ public sealed class VpnSystemTests
             Outbox = outbox;
             Cli = cli;
             History = history;
+            Policy = policy;
             System = system;
         }
 
@@ -621,6 +688,8 @@ public sealed class VpnSystemTests
         public ScriptedCli Cli { get; }
 
         public ConnectionHistory History { get; }
+
+        public VpnPolicyStore Policy { get; }
 
         public VpnSystem System { get; }
 
@@ -641,6 +710,10 @@ public sealed class VpnSystemTests
             var outbox = new OutboxStore(db, time);
             var cli = new ScriptedCli(handler);
             var history = new ConnectionHistory(Path.Combine(directory, "vpn-history.json"), time);
+            var policy = new VpnPolicyStore(
+                time,
+                NullLogger<VpnPolicyStore>.Instance,
+                Path.Combine(directory, "vpn-policy.json"));
             var options = new VpnOptions
             {
                 CliPath = cliPath,
@@ -659,8 +732,9 @@ public sealed class VpnSystemTests
                 history: history,
                 protonGuiRunning: protonGuiRunning ?? (() => false),
                 readinessProbe: readinessProbe ?? new StubReadinessProbe(_ => true),
-                serverLinkConnected: serverLinkConnected);
-            return new VpnHarness(directory, db, outbox, cli, history, system);
+                serverLinkConnected: serverLinkConnected,
+                policyStore: policy);
+            return new VpnHarness(directory, db, outbox, cli, history, policy, system);
         }
 
         public ValueTask DisposeAsync()

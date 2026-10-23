@@ -32,6 +32,8 @@ import type {
   UploadConflict,
   VpnConnectInput,
   VpnPageSnapshot,
+  VpnPolicyUpdateInput,
+  VpnPolicyView,
   WorkspaceInfo,
 } from './types'
 
@@ -206,7 +208,7 @@ export const api = {
   },
 
   postCommand(path: string, options: RequestOptions): Promise<ApiResult<CommandOutcome>> {
-    return request<unknown>(path, { ...options, method: 'POST' }).then((result) => {
+    return request<unknown>(path, { ...options, method: options.method ?? 'POST' }).then((result) => {
       const envelope = assertEnvelope<CommandDetailView | CommandPendingView>(result.data)
       const data = envelope.data
       if (typeof data === 'object' && data !== null && 'commandId' in data) {
@@ -284,6 +286,7 @@ export const apiPaths = {
   vpnPage: (machineId: string) => `${machinePath(machineId)}/vpn/page`,
   vpnConnect: (machineId: string) => `${machinePath(machineId)}/vpn/connect`,
   vpnDisconnect: (machineId: string) => `${machinePath(machineId)}/vpn/disconnect`,
+  vpnPolicy: (machineId: string) => `${machinePath(machineId)}/vpn/policy`,
 }
 
 export function loginUrl(returnUrl: string): string {
@@ -690,6 +693,25 @@ export async function connectVpn(
 export async function disconnectVpn(machineId: string, requestId: string) {
   return api.postCommand(apiPaths.vpnDisconnect(machineId), {
     query: { wait: 0 },
+    requestId,
+    idempotencyKey: requestId,
+  })
+}
+
+export async function fetchVpnPolicy(machineId: string, signal?: AbortSignal) {
+  const result = await api.getEnvelope<VpnPolicyView>(apiPaths.vpnPolicy(machineId), { signal })
+  return { data: result.data.data, meta: result.data.meta }
+}
+
+export async function updateVpnPolicy(
+  machineId: string,
+  input: VpnPolicyUpdateInput,
+  requestId: string,
+) {
+  return api.postCommand(apiPaths.vpnPolicy(machineId), {
+    method: 'PUT',
+    query: { wait: 5 },
+    body: input,
     requestId,
     idempotencyKey: requestId,
   })

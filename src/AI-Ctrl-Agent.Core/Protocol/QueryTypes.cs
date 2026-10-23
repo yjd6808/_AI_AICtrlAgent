@@ -43,6 +43,8 @@ public static class QueryTypes
     public const string VpnCountries = "vpn.countries";
 
     public const string VpnServers = "vpn.servers";
+
+    public const string VpnPolicy = "vpn.policy";
 }
 
 public sealed record AgentInstancesQuery(string? Kind);

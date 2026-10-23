@@ -251,6 +251,28 @@ describe('application integration', () => {
     expect(screen.getByText('Proton VPN 앱')).toBeInTheDocument()
   })
 
+  it('loads and updates the VPN failover policy', async () => {
+    const user = userEvent.setup()
+    renderApp('/m/mach_alpha/vpn')
+
+    expect(
+      await screen.findByRole('heading', { name: '자동 VPN 전환' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText('할당량 소진')).toBeInTheDocument()
+
+    const maxLoad = screen.getByLabelText('최대 부하')
+    await user.clear(maxLoad)
+    await user.type(maxLoad, '55')
+    await user.click(screen.getByRole('button', { name: '정책 저장' }))
+
+    expect(
+      await screen.findByText('VPN 정책 저장 명령을 접수했습니다.'),
+    ).toBeInTheDocument()
+    await waitFor(() => {
+      expect(getMockState().vpn.mach_alpha.policy.maxLoad).toBe(55)
+    })
+  })
+
   it('follows VPN disconnect and reconnect commands', async () => {
     const user = userEvent.setup()
     renderApp('/m/mach_alpha/vpn')

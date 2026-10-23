@@ -1,0 +1,95 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 14px;
+  min-height: 420px;
+}
+
+.files,
+.viewer {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgb(18 24 33 / 62%);
+}
+
+.files {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.file,
+.fileActive {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.file:hover {
+  background: rgb(255 255 255 / 3%);
+}
+
+.fileActive {
+  background: rgb(63 182 168 / 10%);
+  color: var(--accent);
+}
+
+.file svg,
+.fileActive svg {
+  grid-row: span 2;
+  margin-top: 2px;
+}
+
+.fileName {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileMeta {
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
+.viewer {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 12px;
+}
+
+.truncated {
+  margin: 0 0 8px;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.content {
+  flex: 1;
+  margin: 0;
+  overflow: auto;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -171,9 +171,25 @@ public sealed class VpnRecoverySystem : IAcSystem
         {
             await NotifyAsync(trigger.Kind, trigger, ct: ct).ConfigureAwait(false);
 
+            var aborted = await _actions
+                .AbortSessionAsync(trigger.Session, ct)
+                .ConfigureAwait(false);
+            if (!aborted.Succeeded)
+            {
+                await NotifyAsync(
+                    VpnRecoveryNoticeKind.Failed,
+                    trigger,
+                    aborted.Server,
+                    aborted.ErrorCode,
+                    ct).ConfigureAwait(false);
+                return;
+            }
+
             if (_options.AutoConnectVpn)
             {
-                var connected = await _actions.ConnectVpnAsync(ct).ConfigureAwait(false);
+                var connected = await _actions
+                    .ConnectVpnAsync(trigger.ToContext(), ct)
+                    .ConfigureAwait(false);
                 if (!connected.Succeeded)
                 {
                     await NotifyAsync(
@@ -270,17 +286,32 @@ public sealed class VpnRecoverySystem : IAcSystem
         {
             ErrorClass.QuotaExceeded => VpnRecoveryNoticeKind.QuotaExceeded,
             ErrorClass.RateLimited when _options.HandleRateLimited => VpnRecoveryNoticeKind.RateLimited,
+            ErrorClass.Network when _options.HandleStalled => VpnRecoveryNoticeKind.Stalled,
             _ => (VpnRecoveryNoticeKind?)null,
         };
         return kind is null
             ? ValueTask.CompletedTask
-            : EnqueueAsync(new RecoveryTrigger(classified.Session, kind.Value, null), ct);
+            : EnqueueAsync(
+                new RecoveryTrigger(
+                    classified.Session,
+                    kind.Value,
+                    StalledFor: null,
+                    classified.Error.Class,
+                    classified.Error.Message,
+                    classified.Retry),
+                ct);
     }
 
     private ValueTask OnStalledAsync(SessionStalledEvent stalled, CancellationToken ct) =>
         _options.HandleStalled
             ? EnqueueAsync(
-                new RecoveryTrigger(stalled.Session, VpnRecoveryNoticeKind.Stalled, stalled.StalledFor),
+                new RecoveryTrigger(
+                    stalled.Session,
+                    VpnRecoveryNoticeKind.Stalled,
+                    stalled.StalledFor,
+                    ErrorClass.Unknown,
+                    Message: null,
+                    Retry: null),
                 ct)
             : ValueTask.CompletedTask;
 
@@ -338,5 +369,12 @@ public sealed class VpnRecoverySystem : IAcSystem
     private sealed record RecoveryTrigger(
         SessionRef Session,
         VpnRecoveryNoticeKind Kind,
-        TimeSpan? StalledFor);
+        TimeSpan? StalledFor,
+        ErrorClass ErrorClass,
+        string? Message,
+        RetryInfo? Retry)
+    {
+        public VpnRecoveryContext ToContext() =>
+            new(Kind, ErrorClass, Message, Retry, StalledFor);
+    }
 }

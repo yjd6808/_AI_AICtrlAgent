@@ -55,33 +55,107 @@ public sealed class AbortAndPromptRunner
         ArgumentNullException.ThrowIfNull(instance);
         ArgumentNullException.ThrowIfNull(payload);
 
-        var sessionId = payload.Session.SessionId;
-        var (failure, aborted) = await SettleAsync(instance, sessionId, depth: 0, ct).ConfigureAwait(false);
+        var abort = await AbortAsync(instance, payload.Session, commandId, ct).ConfigureAwait(false);
+        if (!abort.Succeeded)
+        {
+            return abort;
+        }
+
+        var (prompt, accepted) = await PromptCoreAsync(instance, payload, commandId, ct).ConfigureAwait(false);
+        if (!prompt.Succeeded || accepted is null)
+        {
+            return prompt;
+        }
+
+        var aborted = abort.Result is { } abortResult
+            && abortResult.TryGetProperty("abortedSessions", out var abortedValue)
+            && abortedValue.TryGetInt32(out var count)
+                ? count
+                : 0;
+        var result = new AbortAndPromptResult(aborted, accepted.MessageId, accepted.AcceptedAt);
+        return CommandResult.Success(JsonSerializer.SerializeToElement(result, AcJsonContext.Default.AbortAndPromptResult));
+    }
+
+    public async Task<CommandResult> AbortAsync(
+        IProviderInstance instance,
+        SessionRef session,
+        string commandId,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(instance);
+        var (failure, aborted) = await SettleAsync(
+            instance,
+            session.SessionId,
+            depth: 0,
+            ct).ConfigureAwait(false);
         if (failure is not null)
         {
             return failure;
+        }
+
+        var result = new AbortAndPromptResult(aborted, string.Empty, _time.GetUtcNow());
+        return CommandResult.Success(
+            JsonSerializer.SerializeToElement(result, AcJsonContext.Default.AbortAndPromptResult));
+    }
+
+    public async Task<CommandResult> PromptAsync(
+        IProviderInstance instance,
+        SessionAbortAndPromptPayload payload,
+        string commandId,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(instance);
+        ArgumentNullException.ThrowIfNull(payload);
+        var (result, _) = await PromptCoreAsync(instance, payload, commandId, ct).ConfigureAwait(false);
+        return result;
+    }
+
+    private async Task<(CommandResult Result, PromptAccepted? Accepted)> PromptCoreAsync(
+        IProviderInstance instance,
+        SessionAbortAndPromptPayload payload,
+        string commandId,
+        CancellationToken ct)
+    {
+        var sessionId = payload.Session.SessionId;
+        var state = await instance.GetSessionAsync(sessionId, ct).ConfigureAwait(false);
+        if (state is null)
+        {
+            return (Failure(AcErrorCodes.SessionNotFound, $"Session '{sessionId}' was not found."), null);
+        }
+
+        if (state.RunState == AcRunState.ForeignBusy)
+        {
+            return (Failure(AcErrorCodes.ForeignTurn, $"Session '{sessionId}' is busy with a foreign turn."), null);
+        }
+
+        if (IsBusy(state.RunState)
+            || !await IsSettledAsync(instance, sessionId, ct).ConfigureAwait(false))
+        {
+            return (Failure(
+                AcErrorCodes.NotSettled,
+                $"Session '{sessionId}' must be settled before prompting."), null);
         }
 
         var promptStartedAt = _time.GetUtcNow();
         var accepted = await instance
             .PromptAsync(sessionId, new PromptRequest(payload.Text, payload.Model, null, commandId), ct)
             .ConfigureAwait(false);
-
         var confirmed = await WaitUntilAsync(
             token => IsPromptVisibleAsync(instance, sessionId, accepted, payload.Text, promptStartedAt, token),
             _options.PromptConfirmWait,
             ct).ConfigureAwait(false);
-
         if (!confirmed)
         {
             _logger.LogWarning("Prompt {CommandId} was not confirmed on session {SessionId}", commandId, sessionId);
-            return CommandResult.Unconfirmed(
+            return (CommandResult.Unconfirmed(
                 AcErrorCodes.PromptUnconfirmed,
-                "Prompt was not confirmed within the acceptance window; it was not resent.");
+                "Prompt was not confirmed within the acceptance window; it was not resent."), null);
         }
 
-        var result = new AbortAndPromptResult(aborted, accepted.MessageId, accepted.AcceptedAt);
-        return CommandResult.Success(JsonSerializer.SerializeToElement(result, AcJsonContext.Default.AbortAndPromptResult));
+        return (
+            CommandResult.Success(
+                JsonSerializer.SerializeToElement(accepted, AcJsonContext.Default.PromptAccepted)),
+            accepted);
     }
 
     private async Task<(CommandResult? Failure, int Aborted)> SettleAsync(

@@ -100,6 +100,12 @@ public static class ServerEndpoints
         app.MapGet("/api/v1/machines/{machineId}/vpn/servers", GetVpnServersAsync)
             .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
 
+        app.MapGet("/api/v1/machines/{machineId}/vpn/policy", GetVpnPolicyAsync)
+            .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
+
+        app.MapPut("/api/v1/machines/{machineId}/vpn/policy", UpdateVpnPolicyAsync)
+            .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
+
         app.MapPost("/api/v1/machines/{machineId}/vpn/connect", ConnectVpnAsync)
             .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
 
@@ -536,6 +542,35 @@ public static class ServerEndpoints
             refresh);
         var payload = JsonSerializer.SerializeToElement(query, AcJsonContext.Default.VpnServersQuery);
         return await QueryAsync(context, machineId, QueryTypes.VpnServers, payload, queries, ct).ConfigureAwait(false);
+    }
+
+    private static async Task<IResult> GetVpnPolicyAsync(
+        HttpContext context,
+        string machineId,
+        RemoteQueryService queries,
+        CancellationToken ct) =>
+        await QueryAsync(context, machineId, QueryTypes.VpnPolicy, EmptyObject, queries, ct).ConfigureAwait(false);
+
+    private static async Task<IResult> UpdateVpnPolicyAsync(
+        HttpContext context,
+        string machineId,
+        CommandExecutionService commands,
+        CancellationToken ct)
+    {
+        var body = await ReadBodyAsync(context, AcJsonContext.Default.VpnPolicyUpdatePayload, ct)
+            .ConfigureAwait(false);
+        if (body is null)
+        {
+            return Problem(
+                context,
+                StatusCodes.Status400BadRequest,
+                AcErrorCodes.InvalidPayload,
+                "A VPN policy payload is required.");
+        }
+
+        var payload = JsonSerializer.SerializeToElement(body, AcJsonContext.Default.VpnPolicyUpdatePayload);
+        return await IssueCommandAsync(context, machineId, CommandTypes.VpnPolicySet, payload, commands, ct)
+            .ConfigureAwait(false);
     }
 
     private static async Task<IResult> ConnectVpnAsync(

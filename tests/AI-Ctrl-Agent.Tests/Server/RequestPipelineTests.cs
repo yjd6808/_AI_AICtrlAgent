@@ -429,6 +429,70 @@ public sealed class RequestPipelineTests : IAsyncLifetime
         dispatchedServer.ShouldBe("JP#1");
     }
 
+    [Fact]
+    public async Task Vpn_policy_returns_live_agent_policy()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        string? dispatchedType = null;
+        _agent.Responder = packet =>
+        {
+            dispatchedType = packet.Type;
+            return Task.FromResult<ResponsePacket?>(Response(
+                packet,
+                JsonDocument.Parse(
+                    """{"enabled":true,"minLoad":0,"maxLoad":70,"excludeUsedWithinHours":24,"maxAttemptsPerSession":3,"retryWaitThresholdSeconds":180,"countries":[],"currentServer":"JP#1","updatedAt":"2026-01-01T00:00:00Z","servers":[]}""")
+                    .RootElement.Clone()));
+        };
+
+        using var response = await _browser.GetAsync(
+            $"/api/v1/machines/{_machineId.Value}/vpn/policy",
+            ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, body);
+        using var parsed = JsonDocument.Parse(body);
+        parsed.RootElement.GetProperty("meta").GetProperty("source").GetString().ShouldBe(MetaSources.Live);
+        parsed.RootElement.GetProperty("data").GetProperty("enabled").GetBoolean().ShouldBeTrue();
+        parsed.RootElement.GetProperty("data").GetProperty("maxLoad").GetInt32().ShouldBe(70);
+        dispatchedType.ShouldBe(QueryTypes.VpnPolicy);
+    }
+
+    [Fact]
+    public async Task Vpn_policy_update_dispatches_policy_command()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        string? dispatchedType = null;
+        bool? dispatchedEnabled = null;
+        string? dispatchedCountries = null;
+        _agent.Responder = packet =>
+        {
+            dispatchedType = packet.Type;
+            dispatchedEnabled = packet.Payload.GetProperty("enabled").GetBoolean();
+            dispatchedCountries = packet.Payload.GetProperty("countries").GetRawText();
+            return Task.FromResult<ResponsePacket?>(Response(
+                packet,
+                JsonDocument.Parse("""{"enabled":false}""").RootElement.Clone()));
+        };
+
+        using var response = await _browser.PutAsJsonAsync(
+            $"/api/v1/machines/{_machineId.Value}/vpn/policy?wait=5",
+            new
+            {
+                enabled = false,
+                minLoad = 5,
+                maxLoad = 55,
+                excludeUsedWithinHours = 12,
+                maxAttemptsPerSession = 4,
+                retryWaitThresholdSeconds = 120,
+                countries = new[] { "JP", "NL" },
+            },
+            ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, body);
+        dispatchedType.ShouldBe(CommandTypes.VpnPolicySet);
+        dispatchedEnabled.ShouldBe(false);
+        dispatchedCountries.ShouldBe("""["JP","NL"]""");
+    }
+
     private static ResponsePacket Response(RequestPacket packet, JsonElement data) =>
         new(
             packet.RequestId,

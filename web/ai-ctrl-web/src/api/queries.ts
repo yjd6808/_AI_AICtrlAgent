@@ -31,6 +31,7 @@ import {
   fetchSessions,
   fetchTransfer,
   fetchVpnPage,
+  fetchVpnPolicy,
   fetchWorkspaces,
   issueAbort,
   issueAbortAndPrompt,
@@ -41,6 +42,7 @@ import {
   replyPermission,
   revokeMachine,
   transferContentUrl,
+  updateVpnPolicy,
   apiPaths,
   api,
 } from './client'
@@ -54,6 +56,7 @@ import type {
   SessionView,
   UploadConflict,
   VpnConnectInput,
+  VpnPolicyUpdateInput,
 } from './types'
 import { ulid } from 'ulid'
 
@@ -87,6 +90,7 @@ export const queryKeys = {
     ['file-preview', machineId, workspaceId, path] as const,
   vpnPage: (machineId: string, country: string, prevCity: string) =>
     ['vpn-page', machineId, country, prevCity] as const,
+  vpnPolicy: (machineId: string) => ['vpn-policy', machineId] as const,
 }
 
 const terminalCommandStatuses: CommandStatus[] = [
@@ -551,6 +555,29 @@ export function useVpnDisconnect(machineId: string) {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['vpn-page', machineId] }),
         queryClient.invalidateQueries({ queryKey: queryKeys.machine(machineId) }),
+      ])
+    },
+  })
+}
+
+export function useVpnPolicy(machineId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.vpnPolicy(machineId ?? ''),
+    queryFn: ({ signal }) => fetchVpnPolicy(machineId ?? '', signal),
+    enabled: Boolean(machineId),
+    refetchInterval: 30_000,
+  })
+}
+
+export function useUpdateVpnPolicy(machineId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: VpnPolicyUpdateInput) => updateVpnPolicy(machineId, input, ulid()),
+    retry: false,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.vpnPolicy(machineId) }),
+        queryClient.invalidateQueries({ queryKey: ['vpn-page', machineId] }),
       ])
     },
   })

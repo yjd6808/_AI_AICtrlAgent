@@ -33,6 +33,8 @@ public sealed record SessionErrorClassifiedEvent : AcEvent
     public required SessionRef Session { get; init; }
 
     public required ErrorInfo Error { get; init; }
+
+    public RetryInfo? Retry { get; init; }
 }
 
 public sealed record SessionPermissionRequestedEvent : AcEvent
