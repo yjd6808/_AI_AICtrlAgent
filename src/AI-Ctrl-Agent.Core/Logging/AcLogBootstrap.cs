@@ -17,6 +17,12 @@ public static class AcLogBootstrap
         options.FileLevel = ParseLevel(section["fileLevel"], options.FileLevel);
         options.ConsoleLevel = ParseLevel(section["consoleLevel"], options.ConsoleLevel);
 
+        var directory = section["directory"];
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            options.Directory = directory;
+        }
+
         if (int.TryParse(section["retentionDays"], NumberStyles.Integer, CultureInfo.InvariantCulture, out var retentionDays))
         {
             options.RetentionDays = retentionDays;

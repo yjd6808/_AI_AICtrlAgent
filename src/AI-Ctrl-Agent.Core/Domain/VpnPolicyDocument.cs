@@ -19,9 +19,12 @@ public sealed record VpnPolicyDocument(
     int RetryWaitThresholdSeconds,
     IReadOnlyList<string> Countries,
     DateTimeOffset UpdatedAt,
-    IReadOnlyDictionary<string, VpnServerPolicyState> Servers)
+    IReadOnlyDictionary<string, VpnServerPolicyState> Servers,
+    VpnRecoverySettings? Recovery = null)
 {
-    public static VpnPolicyDocument CreateDefault(DateTimeOffset now) => new(
+    public static VpnPolicyDocument CreateDefault(
+        DateTimeOffset now,
+        VpnRecoverySettings? recovery = null) => new(
         Enabled: true,
         MinLoad: 0,
         MaxLoad: 70,
@@ -30,7 +33,8 @@ public sealed record VpnPolicyDocument(
         RetryWaitThresholdSeconds: 180,
         Countries: Array.Empty<string>(),
         UpdatedAt: now,
-        Servers: new Dictionary<string, VpnServerPolicyState>(StringComparer.OrdinalIgnoreCase));
+        Servers: new Dictionary<string, VpnServerPolicyState>(StringComparer.OrdinalIgnoreCase),
+        Recovery: (recovery ?? new VpnRecoverySettings()).Normalize());
 
     public VpnPolicyDocument Normalize()
     {
@@ -66,6 +70,7 @@ public sealed record VpnPolicyDocument(
             RetryWaitThresholdSeconds = Math.Clamp(RetryWaitThresholdSeconds, 1, 24 * 60 * 60),
             Countries = countries,
             Servers = servers,
+            Recovery = (Recovery ?? new VpnRecoverySettings()).Normalize(),
         };
     }
 

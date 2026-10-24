@@ -141,7 +141,12 @@ public sealed class ProviderHostSystem : IAcSystem
 
         var provider = new OpenCodeProvider(
             _registry.MachineId,
-            new OpenCodeProviderOptions(Username, password, new[] { endpoint }, _options.InstanceId),
+            new OpenCodeProviderOptions(
+                Username,
+                password,
+                new[] { endpoint },
+                _options.InstanceId,
+                Managed: state.Status == BackendStatus.Healthy),
             new ErrorClassifier(),
             _time,
             _logs);

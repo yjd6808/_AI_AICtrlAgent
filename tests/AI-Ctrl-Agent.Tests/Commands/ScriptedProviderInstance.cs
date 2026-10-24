@@ -31,6 +31,10 @@ internal sealed class ScriptedProviderInstance : IProviderInstance
 
     public List<PromptRequest> Prompts { get; } = new();
 
+    public List<SessionCreateRequest> CreateRequests { get; } = new();
+
+    public Func<SessionCreateRequest, ValueTask<SessionSummary>>? OnCreateSession { get; set; }
+
     public List<string> Aborted { get; } = new();
 
     public Func<string, int, ValueTask<AbortResult>>? OnAbort { get; set; }
@@ -81,6 +85,35 @@ internal sealed class ScriptedProviderInstance : IProviderInstance
                 Array.Empty<PartView>(),
                 null));
         }
+    }
+
+    public async ValueTask<SessionSummary> CreateSessionAsync(SessionCreateRequest req, CancellationToken ct)
+    {
+        CreateRequests.Add(req);
+        if (OnCreateSession is not null)
+        {
+            return await OnCreateSession(req);
+        }
+
+        var sessionId = $"ses_created_{CreateRequests.Count}";
+        var summary = new SessionSummary(
+            new SessionRef(new MachineId("m_test"), Info.Id, sessionId),
+            string.IsNullOrWhiteSpace(req.Title) ? sessionId : req.Title,
+            null,
+            req.Directory,
+            AcRunState.Idle,
+            ErrorClass.None,
+            null,
+            Time.GetUtcNow(),
+            req.Model,
+            null,
+            SessionDisplayState.Idle,
+            null,
+            null,
+            0,
+            true);
+        Sessions[sessionId] = summary;
+        return summary;
     }
 
     public ValueTask<IReadOnlyList<SessionSummary>> ListSessionsAsync(SessionQuery q, CancellationToken ct) =>

@@ -10,6 +10,7 @@ import type {
   UploadConflict,
   VpnConnectInput,
   VpnPolicyUpdateInput,
+  VpnRecoveryUpdateInput,
   VpnServerRow,
 } from '../api/types'
 import {
@@ -57,6 +58,81 @@ function notFound(code: string, title: string, detail: string) {
 
 function machineOf(state: MockState, machineId: string) {
   return state.machines.find((machine) => machine.id.value === machineId)
+}
+
+const mockDrives = [
+  {
+    path: 'C:\\',
+    name: 'C:\\',
+    label: 'System',
+    ready: true,
+    totalBytes: 512 * 1024 * 1024 * 1024,
+    freeBytes: 256 * 1024 * 1024 * 1024,
+  },
+  {
+    path: 'E:\\',
+    name: 'E:\\',
+    label: 'Projects',
+    ready: true,
+    totalBytes: 1024 * 1024 * 1024 * 1024,
+    freeBytes: 640 * 1024 * 1024 * 1024,
+  },
+]
+
+const mockQuickPaths = [
+  { key: 'desktop', path: 'C:\\Users\\jdyun\\Desktop' },
+  { key: 'documents', path: 'C:\\Users\\jdyun\\Documents' },
+  { key: 'downloads', path: 'C:\\Users\\jdyun\\Downloads' },
+  { key: 'profile', path: 'C:\\Users\\jdyun' },
+  { key: 'appdata', path: 'C:\\Users\\jdyun\\AppData\\Roaming' },
+  { key: 'localappdata', path: 'C:\\Users\\jdyun\\AppData\\Local' },
+]
+
+const mockFsDirectories: Record<string, string[]> = {
+  'C:\\': ['Users', 'Windows'],
+  'C:\\Users': ['jdyun'],
+  'C:\\Users\\jdyun': ['AppData', 'Desktop', 'Documents', 'Downloads'],
+  'C:\\Users\\jdyun\\AppData': ['Local', 'Roaming'],
+  'C:\\Users\\jdyun\\AppData\\Local': [],
+  'C:\\Users\\jdyun\\AppData\\Roaming': [],
+  'C:\\Users\\jdyun\\Desktop': ['Projects'],
+  'C:\\Users\\jdyun\\Desktop\\Projects': [],
+  'C:\\Users\\jdyun\\Documents': [],
+  'C:\\Users\\jdyun\\Downloads': [],
+  'C:\\Windows': [],
+  'E:\\': ['Programming'],
+  'E:\\Programming': ['Mabi'],
+  'E:\\Programming\\Mabi': ['docs', 'src'],
+  'E:\\Programming\\Mabi\\docs': [],
+  'E:\\Programming\\Mabi\\src': [],
+}
+
+const mockDeniedDirectories = new Set(['C:\\Windows'])
+
+function normalizeFsPath(value: string | null | undefined): string | null {
+  const trimmed = (value ?? '').trim().replace(/\//g, '\\')
+  if (!trimmed) {
+    return null
+  }
+
+  if (/^[A-Za-z]:\\?$/.test(trimmed)) {
+    return `${trimmed.slice(0, 2).toUpperCase()}\\`
+  }
+
+  return trimmed.replace(/\\+$/, '')
+}
+
+function joinFsPath(parentPath: string, name: string): string {
+  return parentPath.endsWith('\\') ? `${parentPath}${name}` : `${parentPath}\\${name}`
+}
+
+function parentFsPath(path: string): string | null {
+  if (/^[A-Za-z]:\\$/.test(path)) {
+    return null
+  }
+
+  const index = path.lastIndexOf('\\')
+  return index <= 2 ? `${path.slice(0, 2)}\\` : path.slice(0, index)
 }
 
 function normalizeRelPath(value: string | null | undefined): string {
@@ -160,7 +236,12 @@ function allVpnRows(vpn: MockVpnState): VpnServerRow[] {
   )
 }
 
-function boundedInt(value: number, min: number, max: number, fallback: number): number {
+function boundedInt(
+  value: number | undefined,
+  min: number,
+  max: number,
+  fallback: number,
+): number {
   const parsed = Number(value)
   if (!Number.isFinite(parsed)) {
     return fallback
@@ -259,6 +340,75 @@ const workspaceHandlers = [
       return notFound('machine_not_found', '머신을 찾을 수 없습니다', machineId)
     }
     return HttpResponse.json(envelope(state, machine.workspaces, machineId))
+  }),
+
+  http.get(`${API}/machines/:machineId/fs`, ({ params, request }) => {
+    const state = getMockState()
+    const machineId = String(params.machineId)
+    const machine = machineOf(state, machineId)
+    if (!machine) {
+      return notFound('machine_not_found', '머신을 찾을 수 없습니다', machineId)
+    }
+
+    const path = normalizeFsPath(new URL(request.url).searchParams.get('path'))
+    if (!path) {
+      return HttpResponse.json(
+        envelope(
+          state,
+          {
+            path: null,
+            parentPath: null,
+            drives: mockDrives,
+            entries: [],
+            quickPaths: mockQuickPaths,
+          },
+          machineId,
+        ),
+      )
+    }
+
+    if (mockDeniedDirectories.has(path)) {
+      return problem(
+        403,
+        'path_denied',
+        '경로가 차단되었습니다',
+        `Directory '${path}' is always denied.`,
+      )
+    }
+
+    const children = mockFsDirectories[path]
+    if (!children) {
+      return problem(
+        400,
+        'path_invalid',
+        '경로를 찾을 수 없습니다',
+        `Directory '${path}' was not found.`,
+      )
+    }
+
+    return HttpResponse.json(
+      envelope(
+        state,
+        {
+          path,
+          parentPath: parentFsPath(path),
+          drives: [],
+          entries: [...children]
+            .sort((left, right) => left.localeCompare(right, 'ko'))
+            .map((name) => {
+              const fullPath = joinFsPath(path, name)
+              return {
+                name,
+                fullPath,
+                isDir: true,
+                denied: mockDeniedDirectories.has(fullPath),
+                isReparsePoint: false,
+              }
+            }),
+        },
+        machineId,
+      ),
+    )
   }),
 
   http.get(
@@ -829,6 +979,105 @@ const vpnHandlers = [
     },
   ),
 
+  http.get(`${API}/machines/:machineId/vpn/recovery`, ({ params }) => {
+    const state = getMockState()
+    const machineId = String(params.machineId)
+    const vpn = vpnStateOf(state, machineId)
+    if (!vpn) {
+      return problem(503, 'vpn_not_available', 'VPN을 사용할 수 없습니다', machineId)
+    }
+    return HttpResponse.json(envelope(state, vpn.recovery, machineId))
+  }),
+
+  http.put(
+    `${API}/machines/:machineId/vpn/recovery`,
+    async ({ params, request }) => {
+      const state = getMockState()
+      const machineId = String(params.machineId)
+      const vpn = vpnStateOf(state, machineId)
+      if (!vpn) {
+        return problem(503, 'vpn_not_available', 'VPN을 사용할 수 없습니다', machineId)
+      }
+      const body = (await request.json().catch(() => ({}))) as VpnRecoveryUpdateInput
+      const requestId = requestIdOf(request)
+      const current = vpn.recovery
+      let webhookConfigured = current.discordWebhookConfigured
+      if (typeof body.discordWebhookUrl === 'string') {
+        if (body.discordWebhookUrl.trim() === '') {
+          webhookConfigured = false
+        } else if (
+          body.discordWebhookUrl.startsWith('https://discord.com/api/webhooks/')
+        ) {
+          webhookConfigured = true
+        } else {
+          return problem(
+            400,
+            'invalid_payload',
+            'Discord webhook URL 형식이 올바르지 않습니다.',
+            machineId,
+          )
+        }
+      }
+      vpn.recovery = {
+        ...current,
+        enabled: body.enabled ?? current.enabled,
+        autoConnectVpn: body.autoConnectVpn ?? current.autoConnectVpn,
+        autoResume: body.autoResume ?? current.autoResume,
+        handleQuotaExceeded: body.handleQuotaExceeded ?? current.handleQuotaExceeded,
+        handleRateLimited: body.handleRateLimited ?? current.handleRateLimited,
+        handleAuthFailed: body.handleAuthFailed ?? current.handleAuthFailed,
+        handleModelUnavailable: body.handleModelUnavailable ?? current.handleModelUnavailable,
+        handleNetwork: body.handleNetwork ?? current.handleNetwork,
+        handleStalled: body.handleStalled ?? current.handleStalled,
+        handleUnknown: body.handleUnknown ?? current.handleUnknown,
+        continuationPrompt:
+          body.continuationPrompt && body.continuationPrompt.trim()
+            ? body.continuationPrompt.trim().slice(0, 4000)
+            : current.continuationPrompt,
+        country:
+          body.country === undefined
+            ? current.country
+            : body.country
+              ? body.country.trim().toUpperCase()
+              : null,
+        city: body.city === undefined ? current.city : body.city?.trim() || null,
+        servers: Array.isArray(body.servers)
+          ? body.servers.map((value) => String(value).trim()).filter(Boolean)
+          : current.servers,
+        cooldownSeconds: boundedInt(body.cooldownSeconds, 0, 86_400, current.cooldownSeconds),
+        maxAttemptsPerSession: boundedInt(
+          body.maxAttemptsPerSession,
+          1,
+          10,
+          current.maxAttemptsPerSession,
+        ),
+        stallThresholdSeconds: boundedInt(
+          body.stallThresholdSeconds,
+          0,
+          86_400,
+          current.stallThresholdSeconds,
+        ),
+        discordEnabled: body.discordEnabled ?? current.discordEnabled,
+        discordNotifyOnFailureOnly:
+          body.discordNotifyOnFailureOnly ?? current.discordNotifyOnFailureOnly,
+        discordWebhookConfigured: webhookConfigured,
+        updatedAt: new Date().toISOString(),
+      }
+      const command = startCommand(
+        state,
+        requestId,
+        machineId,
+        'vpn.recovery.set',
+        'vpn',
+        null,
+        null,
+        'succeeded',
+        700,
+      )
+      return HttpResponse.json(envelope(state, pending(command), machineId), { status: 202 })
+    },
+  ),
+
   http.get(`${API}/machines/:machineId/vpn/page`, ({ params, request }) => {
     const state = getMockState()
     const machineId = String(params.machineId)
@@ -1073,6 +1322,118 @@ export const handlers = [
     return HttpResponse.json(
       envelope(state, { sessions: rows, nextCursor: null, hasMore: false }, machineId),
     )
+  }),
+
+  http.post(`${API}/machines/:machineId/sessions`, async ({ params, request }) => {
+    const state = getMockState()
+    const machineId = String(params.machineId)
+    const machine = machineOf(state, machineId)
+    if (!machine) {
+      return notFound('machine_not_found', '머신을 찾을 수 없습니다', machineId)
+    }
+    if (!machine.online) {
+      return problem(503, 'machine_offline', '머신이 오프라인입니다', machine.hostname)
+    }
+
+    const instanceId = new URL(request.url).searchParams.get('instance')
+    if (!instanceId) {
+      return problem(400, 'invalid_request', '인스턴스가 필요합니다', 'instance 쿼리가 없습니다.')
+    }
+    const instance = (state.instances[machineId] ?? []).find(
+      (item) => item.id.value === instanceId,
+    )
+    if (!instance) {
+      return notFound('instance_not_found', '인스턴스를 찾을 수 없습니다', instanceId)
+    }
+    if (!instance.managed) {
+      return problem(
+        403,
+        'capability_missing',
+        '지원하지 않는 기능',
+        'SharedStore 인스턴스는 읽기 전용입니다.',
+      )
+    }
+
+    const body = (await request.json()) as {
+      workspaceId?: string
+      directory?: string
+      title?: string | null
+      initialPrompt?: string | null
+      model?: ModelRef | null
+    }
+    const workspace = body.directory
+      ? null
+      : machine.workspaces.find((item) => item.workspaceId === body.workspaceId)
+    if (!body.directory && !workspace) {
+      return notFound(
+        'workspace_not_found',
+        '워크스페이스를 찾을 수 없습니다',
+        body.workspaceId ?? '',
+      )
+    }
+
+    const directory = body.directory?.trim() || workspace?.root || ''
+    if (!directory) {
+      return problem(
+        400,
+        'path_invalid',
+        '경로를 찾을 수 없습니다',
+        '워킹 디렉토리가 필요합니다.',
+      )
+    }
+
+    const now = Date.now()
+    const nowIso = new Date(now).toISOString()
+    const requestId = requestIdOf(request)
+    const sessionId = `ses_created_${requestId.slice(-8)}`
+    const prompt = body.initialPrompt?.trim() || null
+
+    state.sessions[sessionId] = {
+      ref: {
+        machine: { value: machineId },
+        instance: { value: instanceId },
+        sessionId,
+      },
+      title: body.title?.trim() || '새 세션',
+      parentId: null,
+      directory,
+      runState: 'Idle',
+      lastError: 'None',
+      lastErrorMessage: null,
+      updatedAt: nowIso,
+      lastModel: body.model ?? null,
+      retry: null,
+      displayState: 'Idle',
+      busySince: null,
+      lastActivityAt: nowIso,
+      messageCount: prompt ? 1 : 0,
+      activeOnInstance: true,
+    }
+    state.messages[sessionId] = []
+
+    const command = startCommand(
+      state,
+      requestId,
+      machineId,
+      'session.create',
+      'create',
+      sessionId,
+      prompt,
+      'succeeded',
+      0,
+    )
+    command.completed = true
+    command.detail.status = 'Succeeded'
+    command.detail.updatedAt = nowIso
+    command.detail.result = {
+      session: state.sessions[sessionId],
+      prompt: prompt
+        ? { messageId: `${sessionId}_m0`, acceptedAt: nowIso }
+        : null,
+      promptError: null,
+    }
+
+    return HttpResponse.json(envelope(state, command.detail, machineId))
   }),
 
   http.get(`${API}/machines/:machineId/sessions/:sessionId`, ({ params }) => {

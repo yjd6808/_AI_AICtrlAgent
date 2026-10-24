@@ -31,6 +31,14 @@ dotnet build src\AI-Ctrl-Agent.Server\AI-Ctrl-Agent.Server.csproj -c Release
 dotnet test tests\AI-Ctrl-Agent.Tests\AI-Ctrl-Agent.Tests.csproj -c Release
 ```
 
+OpenCode 서비스만 다시 빌드·배포하려면 다음을 실행합니다. 서비스가 실행 중이면 exe 복사가 건너뛰어지므로 먼저 중지합니다.
+
+```powershell
+sc.exe stop AI-Ctrl-OpenCodeServer
+C:\AiCtrl\Build-OpenCodeService.ps1
+sc.exe start AI-Ctrl-OpenCodeServer
+```
+
 ### 웹
 
 ```powershell
@@ -70,6 +78,7 @@ src/
   AI-Ctrl-Agent.ApiClient/   로컬 API 클라이언트
   AI-Ctrl-Agent.ClientMCP/   stdio MCP 서버와 도구 10개
   AI-Ctrl-Agent.ServerMCP/   빈 Generic Host (MCP 아님)
+  AI-Ctrl-Agent.OpenCodeService/  OpenCode Windows 서비스 호스트 (net48)
 tests/
   AI-Ctrl-Agent.Tests/       xUnit v3 테스트
   AI-Ctrl-Agent.FakeOpenCode 가짜 OpenCode HTTP/SSE 서버
@@ -78,6 +87,8 @@ web/
 docs/
   ...                        이 문서들
 ```
+
+운영 스크립트는 저장소에 두지 않습니다. 배포 루트 `C:\AiCtrl`에 `*.ps1`, `*.bat`으로 있습니다.
 
 의존 방향은 `Architecture/DependencyDirectionTests`가 검증합니다. Core는 Server/Client를 참조하지 않습니다. Server와 Client는 Core만 참조합니다.
 

@@ -106,6 +106,12 @@ public static class ServerEndpoints
         app.MapPut("/api/v1/machines/{machineId}/vpn/policy", UpdateVpnPolicyAsync)
             .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
 
+        app.MapGet("/api/v1/machines/{machineId}/vpn/recovery", GetVpnRecoveryAsync)
+            .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
+
+        app.MapPut("/api/v1/machines/{machineId}/vpn/recovery", UpdateVpnRecoveryAsync)
+            .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
+
         app.MapPost("/api/v1/machines/{machineId}/vpn/connect", ConnectVpnAsync)
             .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
 
@@ -113,6 +119,9 @@ public static class ServerEndpoints
             .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
 
         app.MapPost("/api/v1/machines/{machineId}/instances/refresh", RefreshInstancesAsync)
+            .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
+
+        app.MapPost("/api/v1/machines/{machineId}/sessions", CreateSessionAsync)
             .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
 
         app.MapPost("/api/v1/machines/{machineId}/sessions/{sessionId}/abort", AbortSessionAsync)
@@ -573,6 +582,76 @@ public static class ServerEndpoints
             .ConfigureAwait(false);
     }
 
+    private static async Task<IResult> GetVpnRecoveryAsync(
+        HttpContext context,
+        string machineId,
+        RemoteQueryService queries,
+        CancellationToken ct) =>
+        await QueryAsync(context, machineId, QueryTypes.VpnRecovery, EmptyObject, queries, ct)
+            .ConfigureAwait(false);
+
+    private static async Task<IResult> UpdateVpnRecoveryAsync(
+        HttpContext context,
+        string machineId,
+        CommandExecutionService commands,
+        CancellationToken ct)
+    {
+        var body = await ReadBodyAsync(context, AcJsonContext.Default.VpnRecoveryUpdatePayload, ct)
+            .ConfigureAwait(false);
+        if (body is null)
+        {
+            return Problem(
+                context,
+                StatusCodes.Status400BadRequest,
+                AcErrorCodes.InvalidPayload,
+                "A VPN recovery payload is required.");
+        }
+
+        if (ValidateVpnRecovery(context, body) is { } invalid)
+        {
+            return invalid;
+        }
+
+        var payload = JsonSerializer.SerializeToElement(body, AcJsonContext.Default.VpnRecoveryUpdatePayload);
+        return await IssueCommandAsync(context, machineId, CommandTypes.VpnRecoverySet, payload, commands, ct)
+            .ConfigureAwait(false);
+    }
+
+    private static IResult? ValidateVpnRecovery(HttpContext context, VpnRecoveryUpdatePayload body)
+    {
+        if (!string.IsNullOrWhiteSpace(body.DiscordWebhookUrl)
+            && !VpnRecoverySettings.TryParseDiscordWebhook(body.DiscordWebhookUrl, out _))
+        {
+            return Problem(
+                context,
+                StatusCodes.Status400BadRequest,
+                AcErrorCodes.InvalidPayload,
+                "The Discord webhook URL must be an HTTPS Discord webhook URL.");
+        }
+
+        if (body.ContinuationPrompt is { Length: > 4000 })
+        {
+            return Problem(
+                context,
+                StatusCodes.Status400BadRequest,
+                AcErrorCodes.InvalidPayload,
+                "The continuation prompt must be 4000 characters or fewer.");
+        }
+
+        if (body.CooldownSeconds is < 0 or > 86_400
+            || body.StallThresholdSeconds is < 0 or > 86_400
+            || body.MaxAttemptsPerSession is < 1 or > 10)
+        {
+            return Problem(
+                context,
+                StatusCodes.Status400BadRequest,
+                AcErrorCodes.InvalidPayload,
+                "VPN recovery numeric settings are out of range.");
+        }
+
+        return null;
+    }
+
     private static async Task<IResult> ConnectVpnAsync(
         HttpContext context,
         string machineId,
@@ -603,6 +682,49 @@ public static class ServerEndpoints
         CancellationToken ct) =>
         await IssueCommandAsync(context, machineId, CommandTypes.InstanceRefresh, EmptyObject, commands, ct)
             .ConfigureAwait(false);
+
+    private static async Task<IResult> CreateSessionAsync(
+        HttpContext context,
+        string machineId,
+        CommandExecutionService commands,
+        CancellationToken ct)
+    {
+        var instance = context.Request.Query["instance"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(instance))
+        {
+            return Problem(context, StatusCodes.Status400BadRequest, AcErrorCodes.InvalidPayload, "The 'instance' query parameter is required.");
+        }
+
+        var body = await ReadBodyAsync(context, AcJsonContext.Default.SessionCreateBody, ct).ConfigureAwait(false);
+        if (body is null
+            || (string.IsNullOrWhiteSpace(body.WorkspaceId) && string.IsNullOrWhiteSpace(body.Directory)))
+        {
+            return Problem(
+                context,
+                StatusCodes.Status400BadRequest,
+                AcErrorCodes.InvalidPayload,
+                "Either 'workspaceId' or 'directory' is required.");
+        }
+
+        var payload = JsonSerializer.SerializeToElement(
+            new SessionCreatePayload(
+                new InstanceId(instance),
+                body.WorkspaceId,
+                body.Title,
+                body.InitialPrompt ?? string.Empty,
+                body.Model,
+                body.Directory),
+            AcJsonContext.Default.SessionCreatePayload);
+        return await IssueCommandAsync(
+                context,
+                machineId,
+                CommandTypes.SessionCreate,
+                payload,
+                commands,
+                ct,
+                defaultWait: TimeSpan.FromSeconds(20))
+            .ConfigureAwait(false);
+    }
 
     private static async Task<IResult> AbortSessionAsync(
         HttpContext context,
@@ -855,7 +977,8 @@ public static class ServerEndpoints
         string type,
         JsonElement payload,
         CommandExecutionService commands,
-        CancellationToken ct)
+        CancellationToken ct,
+        TimeSpan? defaultWait = null)
     {
         var traceId = TraceId(context);
         var actor = UserId(context);
@@ -872,7 +995,7 @@ public static class ServerEndpoints
             return Problem(context, StatusCodes.Status400BadRequest, AcErrorCodes.InvalidPayload, "X-Request-Id must be a valid ULID.");
         }
 
-        TimeSpan? wait = null;
+        TimeSpan? wait = defaultWait;
         if (double.TryParse(context.Request.Query["wait"], CultureInfo.InvariantCulture, out var waitSeconds))
         {
             wait = TimeSpan.FromSeconds(Math.Clamp(waitSeconds, 0, 120));

@@ -16,6 +16,10 @@ public enum VpnRecoveryNoticeKind
     Resumed,
     Failed,
     Exhausted,
+    Network,
+    AuthFailed,
+    ModelUnavailable,
+    Unknown,
 }
 
 public sealed record VpnRecoveryNotice(
@@ -38,7 +42,11 @@ public sealed class DiscordVpnRecoveryNotifier : IVpnRecoveryNotifier
         Timeout = TimeSpan.FromSeconds(10),
     };
 
-    private readonly Uri? _webhook;
+    private readonly VpnPolicyStore? _policy;
+
+    private readonly VpnRecoveryOptions? _options;
+
+    private readonly VpnRecoverySettings _staticSettings;
 
     private readonly HttpClient _client;
 
@@ -55,11 +63,36 @@ public sealed class DiscordVpnRecoveryNotifier : IVpnRecoveryNotifier
         VpnRecoveryOptions options,
         ILogger<DiscordVpnRecoveryNotifier> logger,
         HttpClient client)
+        : this((VpnPolicyStore?)null, options, logger, client, marker: true)
     {
+    }
+
+    public DiscordVpnRecoveryNotifier(
+        VpnPolicyStore policy,
+        VpnRecoveryOptions options,
+        ILogger<DiscordVpnRecoveryNotifier> logger,
+        HttpClient? client = null)
+        : this(policy, options, logger, client ?? SharedClient, marker: true)
+    {
+    }
+
+    private DiscordVpnRecoveryNotifier(
+        VpnPolicyStore? policy,
+        VpnRecoveryOptions options,
+        ILogger<DiscordVpnRecoveryNotifier> logger,
+        HttpClient client,
+        bool marker)
+    {
+        _ = marker;
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(client);
-        _webhook = options.WebhookUri;
+        _policy = policy;
+        _options = options;
+        _staticSettings = options.ToSettings() with
+        {
+            DiscordEnabled = options.DiscordEnabled || options.WebhookUri is not null,
+        };
         _logger = logger;
         _client = client;
     }
@@ -67,7 +100,22 @@ public sealed class DiscordVpnRecoveryNotifier : IVpnRecoveryNotifier
     public async Task SendAsync(VpnRecoveryNotice notice, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(notice);
-        if (_webhook is null)
+        var settings = _policy is null
+            ? _staticSettings.Normalize()
+            : await _policy.GetRecoveryAsync(ct).ConfigureAwait(false);
+        if (!settings.DiscordEnabled)
+        {
+            return;
+        }
+
+        if (settings.DiscordNotifyOnFailureOnly
+            && notice.Kind is not (VpnRecoveryNoticeKind.Failed or VpnRecoveryNoticeKind.Exhausted))
+        {
+            return;
+        }
+
+        var webhook = await ResolveWebhookAsync(ct).ConfigureAwait(false);
+        if (webhook is null)
         {
             return;
         }
@@ -80,7 +128,7 @@ public sealed class DiscordVpnRecoveryNotifier : IVpnRecoveryNotifier
         HttpResponseMessage response;
         try
         {
-            response = await _client.PostAsync(_webhook, content, ct).ConfigureAwait(false);
+            response = await _client.PostAsync(webhook, content, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -107,13 +155,28 @@ public sealed class DiscordVpnRecoveryNotifier : IVpnRecoveryNotifier
         }
     }
 
+    private async Task<Uri?> ResolveWebhookAsync(CancellationToken ct)
+    {
+        if (_policy is not null)
+        {
+            var stored = await _policy.GetDiscordWebhookAsync(ct).ConfigureAwait(false);
+            return VpnRecoverySettings.TryParseDiscordWebhook(stored, out var parsed) ? parsed : null;
+        }
+
+        return _options?.WebhookUri;
+    }
+
     private static string Format(VpnRecoveryNotice notice)
     {
         var target = $"{notice.Machine} / {notice.Session.Instance.Value} / {notice.Session.SessionId}";
         return notice.Kind switch
         {
-            VpnRecoveryNoticeKind.QuotaExceeded => $"[AI-Ctrl] {target}: 할당량 소진 감지",
-            VpnRecoveryNoticeKind.RateLimited => $"[AI-Ctrl] {target}: API rate limit 감지",
+            VpnRecoveryNoticeKind.QuotaExceeded => $"[AI-Ctrl] {target}: 무료 할당량 소진 감지",
+            VpnRecoveryNoticeKind.RateLimited => $"[AI-Ctrl] {target}: API 요청 한도(429) 감지",
+            VpnRecoveryNoticeKind.AuthFailed => $"[AI-Ctrl] {target}: 인증 실패 감지",
+            VpnRecoveryNoticeKind.ModelUnavailable => $"[AI-Ctrl] {target}: 모델 사용 불가 감지",
+            VpnRecoveryNoticeKind.Network => $"[AI-Ctrl] {target}: 네트워크 오류 감지",
+            VpnRecoveryNoticeKind.Unknown => $"[AI-Ctrl] {target}: 알 수 없는 오류 감지",
             VpnRecoveryNoticeKind.Stalled =>
                 $"[AI-Ctrl] {target}: {Math.Max(1, (int)Math.Round(notice.StalledFor?.TotalMinutes ?? 0))}분 정체",
             VpnRecoveryNoticeKind.VpnConnected =>

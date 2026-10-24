@@ -19,6 +19,8 @@ public interface IProviderInstance : IAsyncDisposable
 
     ValueTask<SessionSummary?> GetSessionAsync(string sessionId, CancellationToken ct);
 
+    ValueTask<SessionSummary> CreateSessionAsync(SessionCreateRequest req, CancellationToken ct);
+
     ValueTask<Page<MessageView>> GetMessagesAsync(string sessionId, PageRequest page, CancellationToken ct);
 
     ValueTask<IReadOnlyList<ModelOption>> ListModelsAsync(CancellationToken ct);

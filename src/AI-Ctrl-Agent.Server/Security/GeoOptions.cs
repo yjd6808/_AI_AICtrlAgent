@@ -6,7 +6,7 @@ namespace AiCtrl.Server.Security;
 
 public sealed record GeoOptions
 {
-    public string DbPath { get; init; } = @"C:\AiCtrl\Server\data\GeoLite2-Country.mmdb";
+    public string DbPath { get; init; } = @"C:\AiCtrl\AgentServer\data\GeoLite2-Country.mmdb";
 
     public IReadOnlyList<string> AllowCountries { get; init; } = ["KR"];
 

@@ -23,6 +23,9 @@ public static class WorkspaceEndpoints
         app.MapGet("/api/v1/machines/{machineId}/workspaces", ListWorkspacesAsync)
             .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
 
+        app.MapGet("/api/v1/machines/{machineId}/fs", BrowseFileSystemAsync)
+            .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
+
         app.MapPost("/api/v1/machines/{machineId}/workspaces", RegisterWorkspaceAsync)
             .RequireAuthorization(GoogleAuthPolicy.BrowserPolicy);
 
@@ -128,6 +131,20 @@ public static class WorkspaceEndpoints
     {
         var payload = JsonDocument.Parse("{}").RootElement.Clone();
         return await QueryAsync(context, machineId, QueryTypes.WorkspaceList, payload, queries, ct)
+            .ConfigureAwait(false);
+    }
+
+    private static async Task<IResult> BrowseFileSystemAsync(
+        HttpContext context,
+        string machineId,
+        RemoteQueryService queries,
+        CancellationToken ct)
+    {
+        var path = context.Request.Query["path"].FirstOrDefault();
+        var payload = JsonSerializer.SerializeToElement(
+            new FsBrowseQuery(string.IsNullOrWhiteSpace(path) ? null : path),
+            AcJsonContext.Default.FsBrowseQuery);
+        return await QueryAsync(context, machineId, QueryTypes.FsBrowse, payload, queries, ct)
             .ConfigureAwait(false);
     }
 

@@ -22,6 +22,13 @@ public sealed record MessagePageDto(
 
 public sealed record AbortSessionBody(bool IncludeChildren = true);
 
+public sealed record SessionCreateBody(
+    string? WorkspaceId,
+    string? Title,
+    string? InitialPrompt,
+    ModelRef? Model,
+    string? Directory = null);
+
 public sealed record PromptBody(string Text, ModelRef? Model, string? Agent);
 
 public sealed record AbortAndPromptBody(string Text, ModelRef? Model);

@@ -36,14 +36,14 @@ public interface IVpnRecoveryActions
 
     Task<VpnRecoveryActionResult> ConnectVpnAsync(VpnRecoveryContext context, CancellationToken ct);
 
-    Task<VpnRecoveryActionResult> ResumeSessionAsync(SessionRef session, CancellationToken ct);
+    Task<VpnRecoveryActionResult> ResumeSessionAsync(
+        SessionRef session,
+        string prompt,
+        CancellationToken ct);
 }
 
 public sealed class VpnRecoveryActions : IVpnRecoveryActions
 {
-    private const string DefaultContinuationPrompt =
-        "Continue from where you stopped. Do not repeat completed work.";
-
     private static readonly TimeSpan DefaultCooldown = TimeSpan.FromHours(24);
 
     private readonly VpnSystem _vpn;
@@ -111,6 +111,7 @@ public sealed class VpnRecoveryActions : IVpnRecoveryActions
     {
         ArgumentNullException.ThrowIfNull(context);
         var policy = await _policy.GetAsync(ct).ConfigureAwait(false);
+        var settings = await _policy.GetRecoveryAsync(ct).ConfigureAwait(false);
         if (!policy.Enabled)
         {
             return VpnRecoveryActionResult.Failure(
@@ -153,6 +154,34 @@ public sealed class VpnRecoveryActions : IVpnRecoveryActions
         }
 
         var servers = await _vpn.GetServerCatalogAsync(refresh: false, ct).ConfigureAwait(false);
+        if (settings.Servers.Count > 0)
+        {
+            var allowed = new HashSet<string>(settings.Servers, StringComparer.OrdinalIgnoreCase);
+            servers = servers
+                .Where(server => allowed.Contains(server.Name))
+                .ToArray();
+        }
+
+        if (!string.IsNullOrWhiteSpace(settings.Country))
+        {
+            servers = servers
+                .Where(server => string.Equals(
+                    server.Country,
+                    settings.Country,
+                    StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+        }
+
+        if (!string.IsNullOrWhiteSpace(settings.City))
+        {
+            servers = servers
+                .Where(server => string.Equals(
+                    server.City,
+                    settings.City,
+                    StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+        }
+
         if (servers.Count == 0)
         {
             return VpnRecoveryActionResult.Failure(
@@ -259,6 +288,7 @@ public sealed class VpnRecoveryActions : IVpnRecoveryActions
 
     public async Task<VpnRecoveryActionResult> ResumeSessionAsync(
         SessionRef session,
+        string prompt,
         CancellationToken ct)
     {
         var instance = ResolveInstance(session);
@@ -273,10 +303,10 @@ public sealed class VpnRecoveryActions : IVpnRecoveryActions
             return VpnRecoveryActionResult.Failure(AcErrorCodes.SessionNotFound);
         }
 
-        var prompt = string.IsNullOrWhiteSpace(_options.ContinuationPrompt)
-            ? DefaultContinuationPrompt
-            : _options.ContinuationPrompt;
-        var payload = new SessionAbortAndPromptPayload(session, prompt, summary.LastModel);
+        var effectivePrompt = string.IsNullOrWhiteSpace(prompt)
+            ? _options.ToSettings().ContinuationPrompt
+            : prompt;
+        var payload = new SessionAbortAndPromptPayload(session, effectivePrompt, summary.LastModel);
         var result = await _runner
             .PromptAsync(instance, payload, CommandId("resume"), ct)
             .ConfigureAwait(false);

@@ -1,0 +1,20 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <RootNamespace>AiCtrl</RootNamespace>
+    <!-- The deployed file name (AiCtrlOpenCodeService.exe) is referenced by the install scripts and the SCM entry. -->
+    <AssemblyName>AiCtrlOpenCodeService</AssemblyName>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>7.3</LangVersion>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System.ServiceProcess" />
+    <Reference Include="System.Security" />
+  </ItemGroup>
+
+</Project>

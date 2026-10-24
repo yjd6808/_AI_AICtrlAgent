@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using AiCtrl.Core.Api;
 using AiCtrl.Core.Commands;
+using AiCtrl.Core.Config;
 using AiCtrl.Core.Domain;
 using AiCtrl.Core.Protocol;
 using AiCtrl.Core.Serialization;
@@ -63,8 +64,8 @@ public sealed class LocalApiClient : IDisposable
         if (string.IsNullOrWhiteSpace(tokenPath))
         {
             tokenPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "AiCtrl",
+                AcDefaultConfigs.AgentHome,
+                "data",
                 "local-token");
         }
 

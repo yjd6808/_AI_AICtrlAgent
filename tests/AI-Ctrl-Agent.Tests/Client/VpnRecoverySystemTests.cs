@@ -32,6 +32,11 @@ public sealed class VpnRecoverySystemTests
                 ["vpn:recovery:cooldownSeconds"] = "30",
                 ["vpn:recovery:maxAttemptsPerSession"] = "2",
                 ["vpn:recovery:continuationPrompt"] = "continue",
+                ["vpn:recovery:handleQuotaExceeded"] = "false",
+                ["vpn:recovery:handleNetwork"] = "false",
+                ["vpn:recovery:handleStalled"] = "false",
+                ["vpn:recovery:stallThresholdSeconds"] = "120",
+                ["vpn:recovery:discordNotifyOnFailureOnly"] = "true",
             })
             .Build();
 
@@ -46,6 +51,12 @@ public sealed class VpnRecoverySystemTests
         options.MaxAttemptsPerSession.ShouldBe(2);
         options.ContinuationPrompt.ShouldBe("continue");
         options.WebhookUri.ShouldNotBeNull();
+        options.DiscordEnabled.ShouldBeTrue();
+        options.HandleQuotaExceeded.ShouldBeFalse();
+        options.HandleNetwork.ShouldBeFalse();
+        options.HandleStalled.ShouldBeFalse();
+        options.StallThresholdSeconds.ShouldBe(120);
+        options.DiscordNotifyOnFailureOnly.ShouldBeTrue();
     }
 
     [Fact]
@@ -84,7 +95,7 @@ public sealed class VpnRecoverySystemTests
         await harness.PublishNetworkRetryAsync(nextAt, ct);
         await harness.Notifier.Resumed.Task.WaitAsync(TimeSpan.FromSeconds(5), ct);
 
-        harness.Notifier.Kinds().ShouldContain(VpnRecoveryNoticeKind.Stalled);
+        harness.Notifier.Kinds().ShouldContain(VpnRecoveryNoticeKind.Network);
         harness.Actions.LastContext.ShouldNotBeNull();
         harness.Actions.LastContext.ErrorClass.ShouldBe(ErrorClass.Network);
         harness.Actions.LastContext.Retry.ShouldNotBeNull();
@@ -147,6 +158,89 @@ public sealed class VpnRecoverySystemTests
         failed.ErrorCode.ShouldBe("vpn_signin_required");
         harness.Actions.AbortCalls.ShouldBe(1);
         harness.Actions.ResumeCalls.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Live_store_settings_apply_without_restart_and_drive_prompt()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            $"aictrl-vpn-recovery-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var store = new VpnPolicyStore(
+                new FakeTimeProvider(),
+                NullLogger<VpnPolicyStore>.Instance,
+                Path.Combine(directory, "vpn-policy.json"));
+            await using var harness = await RecoveryHarness.StartAsync(
+                new VpnRecoveryOptions { Enabled = false },
+                ct,
+                policy: store);
+
+            await harness.PublishQuotaAsync(ct);
+            await Task.Delay(200, ct);
+            harness.Actions.ConnectCalls.ShouldBe(0);
+
+            await store.SaveRecoveryAsync(
+                new VpnRecoveryUpdatePayload(
+                    Enabled: true,
+                    ContinuationPrompt: "resume live",
+                    CooldownSeconds: 0),
+                ct);
+
+            await harness.PublishQuotaAsync(ct);
+            await harness.Notifier.Resumed.Task.WaitAsync(TimeSpan.FromSeconds(5), ct);
+            harness.Actions.ConnectCalls.ShouldBe(1);
+            harness.Actions.LastPrompt.ShouldBe("resume live");
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Disabled_trigger_is_ignored_while_other_triggers_still_work()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var harness = await RecoveryHarness.StartAsync(
+            new VpnRecoveryOptions
+            {
+                Enabled = true,
+                HandleQuotaExceeded = false,
+            },
+            ct);
+
+        await harness.PublishQuotaAsync(ct);
+        await harness.PublishNetworkRetryAsync(harness.Time.GetUtcNow().AddMinutes(1), ct);
+        await harness.Notifier.Resumed.Task.WaitAsync(TimeSpan.FromSeconds(5), ct);
+
+        harness.Actions.ConnectCalls.ShouldBe(1);
+        harness.Notifier.Kinds().ShouldNotContain(VpnRecoveryNoticeKind.QuotaExceeded);
+        harness.Notifier.Kinds().ShouldContain(VpnRecoveryNoticeKind.Network);
+    }
+
+    [Fact]
+    public async Task Stall_threshold_filters_short_stalls()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var harness = await RecoveryHarness.StartAsync(
+            new VpnRecoveryOptions
+            {
+                Enabled = true,
+                StallThresholdSeconds = 300,
+            },
+            ct);
+
+        await harness.PublishStallAsync(TimeSpan.FromMinutes(2), ct);
+        await harness.PublishStallAsync(TimeSpan.FromMinutes(6), ct);
+        var stalled = await harness.Notifier.Stalled.Task.WaitAsync(TimeSpan.FromSeconds(5), ct);
+        await harness.Notifier.Resumed.Task.WaitAsync(TimeSpan.FromSeconds(5), ct);
+
+        stalled.StalledFor.ShouldBe(TimeSpan.FromMinutes(6));
+        harness.Actions.ResumeCalls.ShouldBe(1);
     }
 
     [Fact]
@@ -272,7 +366,8 @@ public sealed class VpnRecoverySystemTests
         public static async Task<RecoveryHarness> StartAsync(
             VpnRecoveryOptions options,
             CancellationToken ct,
-            VpnRecoveryActionResult? connectResult = null)
+            VpnRecoveryActionResult? connectResult = null,
+            VpnPolicyStore? policy = null)
         {
             var logs = new CapturingLoggerFactory();
             var bus = new ChannelAcEventBus(logs);
@@ -285,7 +380,8 @@ public sealed class VpnRecoverySystemTests
                 actions,
                 notifier,
                 options,
-                logs.CreateLogger<VpnRecoverySystem>());
+                logs.CreateLogger<VpnRecoverySystem>(),
+                policy);
             var context = new AcSystemContext(
                 new ServiceCollection().BuildServiceProvider(),
                 bus,
@@ -309,6 +405,22 @@ public sealed class VpnRecoverySystemTests
                         "quota",
                         "quota exhausted",
                         402,
+                        null),
+                },
+                ct);
+
+        public ValueTask PublishErrorAsync(ErrorClass errorClass, CancellationToken ct) =>
+            _bus.PublishAsync(
+                new SessionErrorClassifiedEvent
+                {
+                    EventId = Guid.NewGuid().ToString("N"),
+                    OccurredAt = Time.GetUtcNow(),
+                    Session = _session,
+                    Error = new ErrorInfo(
+                        errorClass,
+                        "test",
+                        "classified",
+                        null,
                         null),
                 },
                 ct);
@@ -365,6 +477,8 @@ public sealed class VpnRecoverySystemTests
 
         public VpnRecoveryContext? LastContext { get; private set; }
 
+        public string? LastPrompt { get; private set; }
+
         public Task<VpnRecoveryActionResult> AbortSessionAsync(
             SessionRef session,
             CancellationToken ct)
@@ -384,9 +498,11 @@ public sealed class VpnRecoverySystemTests
 
         public Task<VpnRecoveryActionResult> ResumeSessionAsync(
             SessionRef session,
+            string prompt,
             CancellationToken ct)
         {
             ResumeCalls++;
+            LastPrompt = prompt;
             return Task.FromResult(VpnRecoveryActionResult.Success());
         }
     }

@@ -6,14 +6,16 @@
 
 | 대상 | 경로 |
 | --- | --- |
-| 서버 기본 | `C:\AiCtrl\Server\config\server.yaml` |
-| 서버 오버라이드 | `C:\AiCtrl\Server\config\server.overrides.yaml` |
-| 서버 시크릿 | `C:\AiCtrl\Server\config\secrets.bin` |
-| 클라이언트 기본 | `%APPDATA%\AiCtrl\client.yaml` |
-| 클라이언트 오버라이드 | `%APPDATA%\AiCtrl\client.overrides.yaml` |
-| 클라이언트 시크릿 | `%LOCALAPPDATA%\AiCtrl\secrets.bin` |
+| 서버 기본 | `C:\AiCtrl\AgentServer\config\server.yaml` |
+| 서버 오버라이드 | `C:\AiCtrl\AgentServer\config\server.overrides.yaml` |
+| 서버 시크릿 | `C:\AiCtrl\AgentServer\config\secrets.bin` |
+| 클라이언트 기본 | `C:\AiCtrl\Agent\config\client.yaml` |
+| 클라이언트 오버라이드 | `C:\AiCtrl\Agent\config\client.overrides.yaml` |
+| 클라이언트 시크릿 | `C:\AiCtrl\Agent\data\secrets.bin` |
 
 서버 설정 경로는 `AcDefaultConfigs.DefaultServerConfigPath`에 하드코딩되어 있습니다. 실행 디렉터리나 명령행 인자로 바꿀 수 없습니다.
+
+Agent 홈은 `AcDefaultConfigs.AgentHome`이 결정합니다. 기본값은 `C:\AiCtrl\Agent`이며 `AICTRL_AGENT_HOME` 환경변수로 덮어쓸 수 있습니다. 설정, 데이터, 로그는 모두 이 홈 아래에 배치됩니다.
 
 ### 병합 순서
 
@@ -53,18 +55,18 @@ $env:AICTRL__logging__fileLevel = 'Information'
 | `auth:googleClientId` | 빈 값 | `AuthOptions` | Google OAuth 클라이언트 ID |
 | `auth:allowedEmails:<n>` | 빈 목록 | `AuthOptions` | 허용 이메일. 소문자로 정규화 |
 | `auth:stepUpMinutes` | 30 | `AuthOptions` | 워크스페이스 등록 step-up 유효 시간 |
-| `geo:dbPath` | `C:\AiCtrl\Server\data\GeoLite2-Country.mmdb` | `GeoOptions` | MaxMind DB 경로 |
+| `geo:dbPath` | `C:\AiCtrl\AgentServer\data\GeoLite2-Country.mmdb` | `GeoOptions` | MaxMind DB 경로 |
 | `geo:allowCountries:<n>` | `[KR]` | `GeoOptions` | 허용 국가 코드. 비어 있으면 KR |
 | `geo:allowCidrs:<n>` | 빈 목록 | `GeoOptions` | 국가 판별과 무관하게 허용할 CIDR |
 | `geo:failClosed` | true | `GeoOptions` | 문자열 `false`일 때만 비활성. 그 외에는 true |
-| `database:path` | `C:\AiCtrl\Server\data\aictrl.db` | `ServerDbOptions` | SQLite 파일 |
+| `database:path` | `C:\AiCtrl\AgentServer\data\aictrl.db` | `ServerDbOptions` | SQLite 파일 |
 | `web:distPath` | 없음 | `WebApp.ResolveDistPath` | SPA dist 경로. 유효하지 않으면 fallback 없이 UI 미제공 |
 | `streams:ringChunks` | 2000 | `StreamOptions` | 세션 ring 최대 청크 수 (최소 1) |
 | `streams:ringBytes` | 1048576 | `StreamOptions` | 세션 ring 최대 바이트 (최소 1024) |
 | `streams:idleDropMinutes` | 10 | `StreamOptions` | 유휴 스트림 정리 기준 (최소 1분) |
 | `streams:leaseSeconds` | 60 | `StreamOptions` | watch lease. 1..300으로 clamp |
 | `streams:longPollMaxMs` | 25000 | `StreamOptions` | long-poll 최대 대기. 0..25000으로 clamp |
-| `transfers:dir` | `C:\AiCtrl\Server\data\transfers` | `TransferOptions` | 전송 임시 디렉터리 |
+| `transfers:dir` | `C:\AiCtrl\AgentServer\data\transfers` | `TransferOptions` | 전송 임시 디렉터리 |
 | `transfers:maxFileBytes` | 2147483648 | `TransferOptions` | 파일 최대 2GiB |
 | `transfers:maxTotalBytes` | 21474836480 | `TransferOptions` | 전체 최대 20GiB |
 | `transfers:chunkBytes` | 8388608 | `TransferOptions` | 청크 8MiB |
@@ -74,12 +76,13 @@ $env:AICTRL__logging__fileLevel = 'Information'
 | `requests:querySeconds` | 10 | `RequestOptions` | 조회 타임아웃 |
 | `requests:waitSeconds` | 10 | `RequestOptions` | 오프라인 대기. **정수만 유효** |
 | `requests:maxAttempts` | 3 | `RequestOptions` | ack 최대 시도 |
+| `logging:directory` | 실행 파일 디렉터리의 `logs` | `AcLogBootstrap` | 파일 로그 디렉터리. 절대 경로 권장 |
 | `logging:fileLevel` | Debug | `AcLogBootstrap` | 파일 로그 최소 레벨 |
 | `logging:consoleLevel` | Information | `AcLogBootstrap` | 콘솔 로그 최소 레벨 |
 | `logging:retentionDays` | 30 | `AcLogBootstrap` | 보존 일수. 0이면 시작 시 기존 로그 전부 삭제 가능 |
 | `logging:maxTotalGB` | 5 | `AcLogBootstrap` | 총 로그 크기. 0이면 전부 삭제 가능 |
 
-환경변수 `AICTRL_LOG_DIR`는 `logging` 디렉터리를 덮어씁니다. 기본 디렉터리는 실행 파일 디렉터리의 `logs`입니다. 단일 파일 최대 크기 500MiB는 설정 키가 없습니다.
+환경변수 `AICTRL_LOG_DIR`는 `logging:directory`를 덮어씁니다. `logging:directory`가 없으면 실행 파일 디렉터리의 `logs`를 사용합니다. 단일 파일 최대 크기 500MiB는 설정 키가 없습니다.
 
 ### 무시되는 키
 
@@ -153,7 +156,7 @@ geo:
 | `serverUrl` | `http://127.0.0.1:5080` | `ServerLinkOptions` | 서버 링크와 등록 기본 URL |
 | `reconnect:maxBackoffSeconds` | 30 | `ServerLinkOptions` | 재연결 최대 백오프. 초기값은 1초 고정 |
 | `localApi:port` | 47800 | `LocalApiOptions` | 0이면 OS가 배정. 0..65535 |
-| `localApi:tokenPath` | `%LOCALAPPDATA%\AiCtrl\local-token` | `LocalApiOptions` | Bearer 토큰 파일 |
+| `localApi:tokenPath` | `C:\AiCtrl\Agent\data\local-token` | `LocalApiOptions` | Bearer 토큰 파일 |
 | `opencode:executable` | `opencode` | `ProviderHostOptions` | 실행 파일. PATH에 없으면 절대 경로 |
 | `opencode:host` | `127.0.0.1` | `ProviderHostOptions` | OpenCode 바인딩 호스트 |
 | `opencode:port` | 4096 | `ProviderHostOptions` | 1..65535 |
@@ -173,29 +176,37 @@ geo:
 | `registeredWorkspaces:<n>:...` | 없음 | `WorkspaceOptions` | `workspaces`와 동일 구조. 클라이언트가 기록 |
 | `vpn:enabled` | true | `VpnOptions` | VPN 기능 전체 on/off |
 | `vpn:helperEnabled` | true | `VpnOptions` | helper 사용. false면 CLI 직접 실행 |
-| `vpn:helperTokenPath` | `%LOCALAPPDATA%\AiCtrl\vpn-helper.token` | `VpnOptions` | helper 인증 토큰 |
+| `vpn:helperTokenPath` | `C:\AiCtrl\Agent\data\vpn-helper.token` | `VpnOptions` | helper 인증 토큰 |
 | `vpn:cliPath` | 빈 값 | `VpnOptions` | ProtonVPN CLI 경로. 비우면 자동 탐색 |
 | `vpn:connectTimeoutSeconds` | 90 | `VpnOptions` | 연결 타임아웃 |
 | `vpn:queryTimeoutSeconds` | 20 | `VpnOptions` | 상태·목록 조회 타임아웃. 기본 YAML에 없음 |
 | `vpn:statusPollSeconds` | 30 | `VpnOptions` | 상태 polling |
 | `vpn:defaultCountry` | JP | `VpnOptions` | 기본 국가. 대문자 정규화 |
-| `vpn:historyPath` | `%LOCALAPPDATA%\AiCtrl\vpn-history.json` | `VpnOptions` | 연결 이력. 기본 YAML에 없음 |
+| `vpn:historyPath` | `C:\AiCtrl\Agent\data\vpn-history.json` | `VpnOptions` | 연결 이력. 기본 YAML에 없음 |
 | `vpn:fallback:mode` | TunnelReady | `VpnOptions` | `TunnelReady` 또는 `ServerLink` |
 | `vpn:fallback:readyUrl` | `http://127.0.0.1:20241/ready` | `VpnOptions` | TunnelReady 확인 URL |
 | `vpn:fallback:minutes` | 5 | `VpnOptions` | fallback 최대 대기 |
-| `vpn:recovery:enabled` | false | `VpnRecoveryOptions` | 자동 복구 활성 |
-| `vpn:recovery:discordWebhookUrl` | 빈 값 | `VpnRecoveryOptions` | HTTPS만 허용 |
+| `vpn:recovery:enabled` | false | `VpnRecoveryOptions` | 자동 복구 기본값. 웹 값이 우선 |
+| `vpn:recovery:discordWebhookUrl` | 빈 값 | `VpnRecoveryOptions` | 폴백 Discord webhook. HTTPS만 허용 |
+| `vpn:recovery:discordEnabled` | false | `VpnRecoveryOptions` | Discord 알림 사용 |
+| `vpn:recovery:discordNotifyOnFailureOnly` | false | `VpnRecoveryOptions` | 실패·시도 초과만 알림 |
 | `vpn:recovery:autoConnectVpn` | true | `VpnRecoveryOptions` | 복구 시 VPN 연결 |
 | `vpn:recovery:autoResume` | true | `VpnRecoveryOptions` | 복구 시 세션 재개 |
+| `vpn:recovery:handleQuotaExceeded` | true | `VpnRecoveryOptions` | 무료 할당량 소진 처리 |
 | `vpn:recovery:handleRateLimited` | true | `VpnRecoveryOptions` | RateLimited 처리 |
-| `vpn:recovery:handleStalled` | true | `VpnRecoveryOptions` | Stall 처리 |
+| `vpn:recovery:handleAuthFailed` | false | `VpnRecoveryOptions` | 인증 실패 처리 |
+| `vpn:recovery:handleModelUnavailable` | false | `VpnRecoveryOptions` | 모델 사용 불가 처리 |
+| `vpn:recovery:handleNetwork` | `handleStalled` 값 | `VpnRecoveryOptions` | 네트워크 오류 처리 |
+| `vpn:recovery:handleStalled` | true | `VpnRecoveryOptions` | 정체 이벤트 처리 |
+| `vpn:recovery:handleUnknown` | false | `VpnRecoveryOptions` | 알 수 없는 오류 처리 |
 | `vpn:recovery:continuationPrompt` | 고정 문장 | `VpnRecoveryOptions` | 재개 프롬프트 |
 | `vpn:recovery:country` | 없음 | `VpnRecoveryOptions` | 복구 국가 |
 | `vpn:recovery:city` | 없음 | `VpnRecoveryOptions` | 복구 도시 |
 | `vpn:recovery:servers:<n>` | 빈 목록 | `VpnRecoveryOptions` | 복구 서버 후보 |
 | `vpn:recovery:cooldownSeconds` | 600 | `VpnRecoveryOptions` | 세션별 쿨다운 |
 | `vpn:recovery:maxAttemptsPerSession` | 3 | `VpnRecoveryOptions` | 세션별 최대 시도 |
-| `logging:fileLevel` 등 | 서버와 동일 | `AcLogBootstrap` | 클라이언트 로그 |
+| `vpn:recovery:stallThresholdSeconds` | 0 | `VpnRecoveryOptions` | 최소 정체 시간. 0이면 모두 처리 |
+| `logging:directory` 등 | 서버와 동일 | `AcLogBootstrap` | 클라이언트 로그. 기본 경로 `C:\AiCtrl\Agent\logs` |
 
 ### 무시되는 키
 
@@ -254,22 +265,36 @@ vpn:
     minutes: 5
   recovery:
     enabled: true
+    discordEnabled: true
+    discordNotifyOnFailureOnly: false
     discordWebhookUrl: 'https://discord.com/api/webhooks/...'
     autoConnectVpn: true
     autoResume: true
+    handleQuotaExceeded: true
+    handleRateLimited: true
+    handleAuthFailed: false
+    handleModelUnavailable: false
+    handleNetwork: true
+    handleStalled: true
+    handleUnknown: false
     continuationPrompt: 'Continue from where you stopped. Do not repeat completed work.'
+    country: 'JP'
+    city: ''
+    servers:
+      - 'JP#1'
     cooldownSeconds: 600
     maxAttemptsPerSession: 3
+    stallThresholdSeconds: 0
 ```
 
-복구는 기본 비활성입니다. Discord webhook은 HTTPS가 아니면 무시됩니다.
+복구는 기본 비활성입니다. Discord webhook은 HTTPS이면서 Discord 호스트의 `/api/webhooks/` 경로여야 하며, 아니면 저장이 거부됩니다. 웹에서 저장한 값은 `vpn-policy.json`과 DPAPI secret store에 기록되고, 이 YAML 값은 파일이 없을 때의 기본값 또는 webhook 폴백으로만 사용됩니다.
 
 ### 클라이언트 오버라이드 예시
 
 ```yaml
 configVersion: 1
 opencode:
-  executable: 'C:\Users\user\AppData\Roaming\npm\node_modules\opencode-ai\bin\opencode.exe'
+  executable: 'C:\Users\user\AppData\Roaming\npm\node_modules\@opencode\cli\bin\opencode.exe'
 ```
 
 워크스페이스 등록은 이 파일에 `registeredWorkspaces` 항목을 추가합니다. 등록 명령이 실행 중일 때 파일을 직접 편집하면 변경이 유실될 수 있습니다.

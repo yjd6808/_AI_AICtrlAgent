@@ -6,7 +6,9 @@ using AiCtrl.Core.Api;
 using AiCtrl.Tests.Client;
 using AiCtrl.Core.Commands;
 using AiCtrl.Core.Domain;
+using AiCtrl.Core.Providers;
 using AiCtrl.Core.Serialization;
+using AiCtrl.Core.Workspace;
 using AiCtrl.Tests.Systems;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -26,9 +28,12 @@ public sealed class CommandSystemTests : IAsyncLifetime
 
     private CommandSystem _commands = null!;
 
+    private string _workspaceId = null!;
+
     public async ValueTask InitializeAsync()
     {
         var ct = TestContext.Current.CancellationToken;
+        Directory.CreateDirectory(_directory);
         var db = new ClientDb(Path.Combine(_directory, "client.db"));
         await db.InitializeAsync(ct);
 
@@ -43,14 +48,24 @@ public sealed class CommandSystemTests : IAsyncLifetime
                 TimeSpan.FromMilliseconds(60)),
             TimeProvider.System,
             NullLogger<AbortAndPromptRunner>.Instance);
+        var workspace = new WorkspaceDefinition(
+            "test",
+            _directory,
+            AllowUpload: true,
+            AllowDownload: true,
+            AllowMkdir: true,
+            AllowDelete: false,
+            DenyPatterns: []);
+        var workspaces = new WorkspaceRegistry(new WorkspaceOptions([workspace], []));
+        _workspaceId = WorkspaceRegistry.CreateWorkspaceId(_directory);
 
         _commands = new CommandSystem(
             new JournalStore(db),
             _actors,
             registry,
             runner,
-            new FilesSystem(new WorkspaceRegistry(new WorkspaceOptions([], []))),
-            TestTransferSystem.Create(db, new WorkspaceRegistry(new WorkspaceOptions([], []))),
+            new FilesSystem(workspaces),
+            TestTransferSystem.Create(db, workspaces),
             TimeProvider.System,
             NullLogger<CommandSystem>.Instance);
     }
@@ -131,6 +146,78 @@ public sealed class CommandSystemTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Session_create_creates_session_and_sends_initial_prompt()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var envelope = SessionCreateEnvelope("cmd_create", _workspaceId, "New chat", "hello");
+
+        var result = await _commands.ExecuteAsync(envelope, ct);
+
+        result.Succeeded.ShouldBeTrue();
+        _instance.CreateRequests.Count.ShouldBe(1);
+        _instance.CreateRequests[0].Directory.ShouldBe(_directory);
+        _instance.CreateRequests[0].Title.ShouldBe("New chat");
+        _instance.Prompts.Count.ShouldBe(1);
+        _instance.Prompts[0].Text.ShouldBe("hello");
+        _instance.Prompts[0].ClientMessageId.ShouldBe("cmd_create");
+
+        result.Result.ShouldNotBeNull();
+        var created = result.Result.Value.Deserialize(AcJsonContext.Default.SessionCreateResult);
+        created.ShouldNotBeNull();
+        created.Session.Ref.SessionId.ShouldBe("ses_created_1");
+        created.Prompt.ShouldNotBeNull();
+        created.PromptError.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Session_create_with_unknown_workspace_fails_without_creating()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var envelope = SessionCreateEnvelope("cmd_create_missing", "ws_missing", null, "");
+
+        var result = await _commands.ExecuteAsync(envelope, ct);
+
+        result.Status.ShouldBe(CommandStatus.Failed);
+        result.ErrorCode.ShouldBe(AcErrorCodes.WorkspaceNotAllowed);
+        _instance.CreateRequests.ShouldBeEmpty();
+        _instance.Prompts.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Session_create_uses_absolute_directory_without_workspace()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var target = Path.Combine(_directory, "custom");
+        Directory.CreateDirectory(target);
+        var envelope = SessionCreateEnvelope("cmd_create_dir", null, "New chat", "", target);
+
+        var result = await _commands.ExecuteAsync(envelope, ct);
+
+        result.Succeeded.ShouldBeTrue();
+        _instance.CreateRequests.Count.ShouldBe(1);
+        _instance.CreateRequests[0].Directory.ShouldBe(target);
+    }
+
+    [Fact]
+    public async Task Session_create_with_missing_directory_fails_without_creating()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var envelope = SessionCreateEnvelope(
+            "cmd_create_missing_dir",
+            null,
+            null,
+            "",
+            Path.Combine(_directory, "missing"));
+
+        var result = await _commands.ExecuteAsync(envelope, ct);
+
+        result.Status.ShouldBe(CommandStatus.Failed);
+        result.ErrorCode.ShouldBe(AcErrorCodes.PathInvalid);
+        _instance.CreateRequests.ShouldBeEmpty();
+        _instance.Prompts.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task Unsupported_command_fails_and_is_journaled()
     {
         var ct = TestContext.Current.CancellationToken;
@@ -182,6 +269,24 @@ public sealed class CommandSystemTests : IAsyncLifetime
             new MachineId("m_test"),
             CommandTypes.SessionPrompt,
             JsonSerializer.SerializeToElement(new SessionPromptPayload(Session, "hello", null, null), AcJsonContext.Default.SessionPromptPayload),
+            "local",
+            DateTimeOffset.UnixEpoch,
+            DateTimeOffset.UnixEpoch.AddMinutes(5),
+            0);
+
+    private static CommandEnvelope SessionCreateEnvelope(
+        string commandId,
+        string? workspaceId,
+        string? title,
+        string initialPrompt,
+        string? directory = null) =>
+        new(
+            commandId,
+            new MachineId("m_test"),
+            CommandTypes.SessionCreate,
+            JsonSerializer.SerializeToElement(
+                new SessionCreatePayload(new InstanceId("opencode:test"), workspaceId, title, initialPrompt, null, directory),
+                AcJsonContext.Default.SessionCreatePayload),
             "local",
             DateTimeOffset.UnixEpoch,
             DateTimeOffset.UnixEpoch.AddMinutes(5),

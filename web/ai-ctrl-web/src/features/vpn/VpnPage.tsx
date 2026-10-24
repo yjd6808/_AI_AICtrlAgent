@@ -32,6 +32,7 @@ import { EmptyBlock, ErrorBlock, LoadingBlock } from '../../components/AsyncStat
 import { useToast } from '../../components/Toast'
 import { cx } from '../../lib/cx'
 import { VpnPolicyPanel } from './VpnPolicyPanel'
+import { VpnRecoveryPanel } from './VpnRecoveryPanel'
 import styles from './VpnPage.module.css'
 
 const rowStateLabels: Record<VpnRowState, string> = {
@@ -276,6 +277,8 @@ export function VpnPage() {
       ) : null}
 
       <VpnPolicyPanel machineId={machineId} />
+
+      <VpnRecoveryPanel machineId={machineId} />
 
       <div className={styles.topGrid}>
         <section className={cx(styles.statusPanel, status.tunnelUp && styles.statusPanelUp)}>

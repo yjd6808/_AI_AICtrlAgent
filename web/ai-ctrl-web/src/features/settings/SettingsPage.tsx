@@ -18,6 +18,7 @@ import { FreshnessBadge } from '../../components/FreshnessBadge'
 import { InlineNotice } from '../../components/InlineNotice'
 import { PageHeader } from '../../components/PageHeader'
 import { useToast } from '../../components/Toast'
+import { VpnRecoveryNotificationPanel } from './VpnRecoveryNotificationPanel'
 import styles from './SettingsPage.module.css'
 
 export function SettingsPage() {
@@ -64,7 +65,7 @@ export function SettingsPage() {
       <PageHeader
         eyebrow="Settings"
         title="설정"
-        description="계정, 머신 등록, 서버 연결 정보를 확인합니다."
+        description="계정, 머신 등록, Discord 알림, 서버 연결 정보를 확인합니다."
         meta={
           import.meta.env.VITE_USE_MOCKS === 'true' ? (
             <Badge tone="warn">목 데이터</Badge>
@@ -198,6 +199,8 @@ export function SettingsPage() {
           </ul>
         )}
       </section>
+
+      <VpnRecoveryNotificationPanel />
 
       <section className={styles.panel}>
         <h2 className={styles.panelTitle}>정보</h2>

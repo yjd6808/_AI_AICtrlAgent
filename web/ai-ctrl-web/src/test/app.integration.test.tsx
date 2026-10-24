@@ -43,6 +43,14 @@ describe('application integration', () => {
     ).toHaveAttribute('href', expect.stringContaining('/api/v1/auth/login'))
   })
 
+  it('redirects an authenticated root request to the machine console', async () => {
+    renderApp('/')
+
+    expect(
+      await screen.findByRole('heading', { name: 'AI Agents' }),
+    ).toBeInTheDocument()
+  })
+
   it('renders machines, instances, and read-only state', async () => {
     renderApp('/m/mach_alpha')
 
@@ -125,6 +133,160 @@ describe('application integration', () => {
         { timeout: 7_000 },
       ),
     ).toBeInTheDocument()
+  })
+
+  it('creates a session with an initial prompt', async () => {
+    const user = userEvent.setup()
+    renderApp('/m/mach_alpha/agents/inst_alpha_opencode')
+
+    await screen.findByRole('button', { name: '새 세션' })
+    await user.click(screen.getByRole('button', { name: '새 세션' }))
+
+    const panel = await screen.findByRole('region', { name: '새 세션 만들기' })
+    const directoryInput = within(panel).getByLabelText('워킹 디렉토리')
+    await waitFor(() => expect(directoryInput).not.toHaveValue(''))
+
+    await user.type(within(panel).getByLabelText('제목 (선택)'), '새 작업')
+    await user.type(
+      within(panel).getByLabelText('첫 프롬프트 (선택)'),
+      '테스트를 실행해 주세요.',
+    )
+    await user.click(within(panel).getByRole('button', { name: '세션 만들기' }))
+
+    expect(
+      await screen.findByRole('heading', { name: '새 작업' }, { timeout: 7_000 }),
+    ).toBeInTheDocument()
+    expect(await screen.findByText('세션을 만들었습니다.')).toBeInTheDocument()
+  })
+
+  it('loads new session model options from the machine API', async () => {
+    server.use(
+      http.get('/api/v1/machines/mach_alpha/models', () =>
+        HttpResponse.json({
+          data: [
+            {
+              providerId: 'external-provider',
+              modelId: 'external-model-x',
+              name: 'External Model X',
+            },
+          ],
+          meta: {
+            source: 'live',
+            asOf: new Date().toISOString(),
+            machineOnline: true,
+            stale: false,
+            latencyMs: 1,
+            traceId: 'test-models',
+          },
+        }),
+      ),
+    )
+
+    const user = userEvent.setup()
+    renderApp('/m/mach_alpha/agents/inst_alpha_opencode')
+
+    await user.click(await screen.findByRole('button', { name: '새 세션' }))
+    const panel = await screen.findByRole('region', { name: '새 세션 만들기' })
+    const select = within(panel).getByLabelText('모델')
+
+    expect(
+      await within(select).findByRole('option', { name: 'External Model X' }),
+    ).toBeInTheDocument()
+  })
+
+  it('selects a working directory from the machine filesystem tree', async () => {
+    const user = userEvent.setup()
+    renderApp('/m/mach_alpha/agents/inst_alpha_opencode')
+
+    await user.click(await screen.findByRole('button', { name: '새 세션' }))
+    const panel = await screen.findByRole('region', { name: '새 세션 만들기' })
+    const directoryInput = within(panel).getByLabelText('워킹 디렉토리')
+    await waitFor(() => expect(directoryInput).toHaveValue('E:\\Programming\\Mabi'))
+
+    await user.click(within(panel).getByRole('button', { name: '경로 선택' }))
+    const dialog = await screen.findByRole('dialog', { name: '폴더 선택' })
+
+    await user.click(await within(dialog).findByRole('button', { name: 'Mabi' }))
+    await user.click(await within(dialog).findByRole('button', { name: 'src' }))
+    await user.click(within(dialog).getByRole('button', { name: '이 폴더 선택' }))
+
+    await waitFor(() =>
+      expect(directoryInput).toHaveValue('E:\\Programming\\Mabi\\src'),
+    )
+    expect(
+      screen.queryByRole('dialog', { name: '폴더 선택' }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('browses a quick path as its own tree root', async () => {
+    const user = userEvent.setup()
+    renderApp('/m/mach_alpha/agents/inst_alpha_opencode')
+
+    await user.click(await screen.findByRole('button', { name: '새 세션' }))
+    const panel = await screen.findByRole('region', { name: '새 세션 만들기' })
+    await user.click(within(panel).getByRole('button', { name: '경로 선택' }))
+    const dialog = await screen.findByRole('dialog', { name: '폴더 선택' })
+
+    const quickGroup = await within(dialog).findByRole('group', {
+      name: '빠른 위치',
+    })
+    expect(
+      within(quickGroup).getByText('C:\\Users\\jdyun\\Desktop'),
+    ).toBeInTheDocument()
+
+    await user.click(
+      within(quickGroup).getByRole('button', { name: '바탕 화면' }),
+    )
+    expect(
+      within(dialog).queryByRole('button', { name: 'Users' }),
+    ).not.toBeInTheDocument()
+
+    await user.click(
+      await within(dialog).findByRole('button', { name: 'Projects' }),
+    )
+    await user.click(within(dialog).getByRole('button', { name: '이 폴더 선택' }))
+
+    await waitFor(() =>
+      expect(within(panel).getByLabelText('워킹 디렉토리')).toHaveValue(
+        'C:\\Users\\jdyun\\Desktop\\Projects',
+      ),
+    )
+  })
+
+  it('navigates the directory picker by typed path and blocks denied paths', async () => {
+    const user = userEvent.setup()
+    renderApp('/m/mach_alpha/agents/inst_alpha_opencode')
+
+    await user.click(await screen.findByRole('button', { name: '새 세션' }))
+    const panel = await screen.findByRole('region', { name: '새 세션 만들기' })
+    await user.click(within(panel).getByRole('button', { name: '경로 선택' }))
+    const dialog = await screen.findByRole('dialog', { name: '폴더 선택' })
+
+    const pathInput = within(dialog).getByLabelText('경로 직접 입력')
+    await user.clear(pathInput)
+    await user.type(pathInput, 'C:\\Windows')
+    await user.click(within(dialog).getByRole('button', { name: '이동' }))
+
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      /always denied/,
+    )
+
+    await user.clear(pathInput)
+    await user.type(pathInput, 'C:\\Users\\jdyun')
+    await user.click(within(dialog).getByRole('button', { name: '이동' }))
+
+    await waitFor(() =>
+      expect(within(dialog).getByLabelText('선택한 폴더 경로')).toHaveTextContent(
+        'C:\\Users\\jdyun',
+      ),
+    )
+    await user.click(within(dialog).getByRole('button', { name: '이 폴더 선택' }))
+
+    await waitFor(() =>
+      expect(within(panel).getByLabelText('워킹 디렉토리')).toHaveValue(
+        'C:\\Users\\jdyun',
+      ),
+    )
   })
 
   it('shows a forbidden state when access is denied', async () => {
@@ -271,6 +433,103 @@ describe('application integration', () => {
     await waitFor(() => {
       expect(getMockState().vpn.mach_alpha.policy.maxLoad).toBe(55)
     })
+  })
+
+  it('updates VPN recovery triggers and restart prompt', async () => {
+    const user = userEvent.setup()
+    renderApp('/m/mach_alpha/vpn')
+
+    expect(
+      await screen.findByRole('heading', { name: '오류 복구와 세션 재시작' }),
+    ).toBeInTheDocument()
+    const prompt = screen.getByLabelText('재시작 프롬프트')
+    expect(prompt).toHaveValue('Continue from where you stopped. Do not repeat completed work.')
+
+    await user.click(screen.getByLabelText('오류 복구 사용'))
+    await user.click(screen.getByLabelText(/무료 할당량 소진/))
+    await user.clear(prompt)
+    await user.type(prompt, 'continue after failover')
+    const cooldown = screen.getByLabelText('재시도 cooldown(초)')
+    await user.clear(cooldown)
+    await user.type(cooldown, '90')
+    await user.click(screen.getByRole('button', { name: '복구 설정 저장' }))
+
+    expect(
+      await screen.findByText('복구 설정 저장 명령을 접수했습니다.'),
+    ).toBeInTheDocument()
+    await waitFor(() => {
+      const recovery = getMockState().vpn.mach_alpha.recovery
+      expect(recovery.enabled).toBe(true)
+      expect(recovery.handleQuotaExceeded).toBe(false)
+      expect(recovery.continuationPrompt).toBe('continue after failover')
+      expect(recovery.cooldownSeconds).toBe(90)
+    })
+  })
+
+  it('configures machine-wide failover from the new session panel', async () => {
+    const user = userEvent.setup()
+    renderApp('/m/mach_alpha/agents/inst_alpha_opencode')
+
+    await user.click(await screen.findByRole('button', { name: '새 세션' }))
+    const panel = await screen.findByRole('region', { name: '새 세션 만들기' })
+    const failover = await within(panel).findByRole('region', {
+      name: '오류 복구(failover) 설정',
+    })
+
+    const enabled = await within(failover).findByLabelText('오류 복구 사용')
+    expect(enabled).not.toBeChecked()
+    expect(
+      within(failover).getByText('이 머신의 모든 세션에 적용됩니다.', {
+        exact: false,
+      }),
+    ).toBeInTheDocument()
+
+    await user.click(enabled)
+    const prompt = await within(failover).findByLabelText('재시작 프롬프트')
+    await user.clear(prompt)
+    await user.type(prompt, 'resume from the new session panel')
+
+    await user.click(within(failover).getByText('고급 설정'))
+    const cooldown = within(failover).getByLabelText('재시도 cooldown(초)')
+    await user.clear(cooldown)
+    await user.type(cooldown, '45')
+
+    await user.click(
+      within(failover).getByRole('button', { name: '복구 설정 저장' }),
+    )
+
+    expect(
+      await screen.findByText('복구 설정 저장 명령을 접수했습니다.'),
+    ).toBeInTheDocument()
+    await waitFor(() => {
+      const recovery = getMockState().vpn.mach_alpha.recovery
+      expect(recovery.enabled).toBe(true)
+      expect(recovery.continuationPrompt).toBe('resume from the new session panel')
+      expect(recovery.cooldownSeconds).toBe(45)
+    })
+  })
+
+  it('configures the Discord webhook from settings', async () => {
+    const user = userEvent.setup()
+    renderApp('/settings')
+
+    expect(
+      await screen.findByRole('heading', { name: 'Discord 장애 알림' }),
+    ).toBeInTheDocument()
+    const webhook = await screen.findByLabelText('Webhook URL')
+    await user.type(webhook, 'https://discord.com/api/webhooks/1/token')
+    await user.click(screen.getByLabelText('Discord 알림 사용'))
+    await user.click(screen.getByRole('button', { name: '알림 설정 저장' }))
+
+    expect(
+      await screen.findByText('Discord 알림 설정 저장 명령을 접수했습니다.'),
+    ).toBeInTheDocument()
+    await waitFor(() => {
+      const recovery = getMockState().vpn.mach_alpha.recovery
+      expect(recovery.discordEnabled).toBe(true)
+      expect(recovery.discordWebhookConfigured).toBe(true)
+    })
+    expect(await screen.findByText('Webhook 설정됨')).toBeInTheDocument()
   })
 
   it('follows VPN disconnect and reconnect commands', async () => {

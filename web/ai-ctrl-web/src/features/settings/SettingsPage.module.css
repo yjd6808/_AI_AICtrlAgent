@@ -54,6 +54,74 @@
   line-height: 1.6;
 }
 
+.form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+  align-items: end;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.field select,
+.fieldWide input {
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+}
+
+.fieldWide {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.formHint {
+  color: var(--text-faint);
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.formActions {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.buttonRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .codeRow {
   display: flex;
   flex-wrap: wrap;

@@ -34,6 +34,10 @@ public static class WebApp
         ArgumentNullException.ThrowIfNull(app);
         if (distPath is null)
         {
+            // Without a built SPA the root still needs a probe response. When dist exists this
+            // mapping must not be registered, otherwise it shadows the SPA fallback and the
+            // client-side router never runs.
+            app.MapGet("/", () => "AI-Ctrl-Agent Server");
             return;
         }
 

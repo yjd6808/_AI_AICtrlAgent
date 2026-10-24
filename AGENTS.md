@@ -1,17 +1,23 @@
 ﻿# AI-Ctrl-Agent
 
+> **필수 로컬 규칙**: 작업을 시작하기 전에 저장소 루트의 `AGENTS.local.md`를 먼저 읽는다. 이 파일은 이 PC의 배포 경로와 실행 절차를 정의하며 Git에 포함되지 않는다. 파일이 없으면 이 문서의 기본 경로를 따른다.
+
 Windows에서 OpenCode 기반 AI 코딩 세션을 원격에서 조회·제어하는 3계층 애플리케이션입니다. 서버가 브라우저와 에이전트를 중계하고, 에이전트가 로컬 OpenCode 인스턴스를 관리합니다.
 
 | 구성 | 프로젝트 | 역할 |
 | --- | --- | --- |
 | Server | `src/AI-Ctrl-Agent.Server` | ASP.NET Core 9. REST API, SignalR 허브, SQLite, Google 로그인, 에이전트 인증 |
 | Agent | `src/AI-Ctrl-Agent.Client` | Windows 콘솔 앱. OpenCode 백엔드, 로컬 API, VPN, 파일 전송, 서버 링크 |
+| OpenCode 서비스 | `src/AI-Ctrl-Agent.OpenCodeService` | Windows 서비스 호스트. `opencode serve`(4096)를 자식 프로세스로 실행·감시 (net48) |
 | Web | `web/ai-ctrl-web` | React 19 + TypeScript + Vite SPA |
 | 공용 | `src/AI-Ctrl-Agent.Core` | 도메인, 프로토콜, 설정, 런타임, 로깅 |
 | 클라이언트 | `src/AI-Ctrl-Agent.ApiClient` | 로컬 API 클라이언트 |
 | MCP | `src/AI-Ctrl-Agent.ClientMCP` | stdio MCP 서버. 로컬 API 도구 10개 제공 |
 | MCP | `src/AI-Ctrl-Agent.ServerMCP` | 현재 빈 Generic Host. MCP 서버 아님 |
 | 테스트 | `tests/AI-Ctrl-Agent.Tests`, `tests/AI-Ctrl-Agent.FakeOpenCode` | xUnit v3 + Shouldly, 가짜 OpenCode 서버 |
+| 운영 스크립트 | `C:\AiCtrl\*.ps1`, `C:\AiCtrl\*.bat` | 서비스 설치·제거, 예약 작업 폴백, Agent·Server 실행 |
+
+소스 프로젝트는 `src/`에 둡니다. `C:\AiCtrl`은 배포 루트로, `src/` 프로젝트의 빌드 산출물과 설정·데이터·로그, 그리고 운영 스크립트(`*.ps1`, `*.bat`)가 모두 이 경로에 모입니다. 소스 코드는 `C:\AiCtrl`에 두지 않습니다.
 
 ## 빠른 시작
 
@@ -27,7 +33,7 @@ Windows에서 OpenCode 기반 AI 코딩 세션을 원격에서 조회·제어하
 
 - .NET SDK: `C:\Program Files\dotnet`
 - Node.js: `C:\_Dev\node-22` (PATH에 등록되어 있지 않음)
-- OpenCode: `C:\Users\<user>\AppData\Roaming\npm\node_modules\opencode-ai\bin\opencode.exe`
+- OpenCode: `C:\Users\<user>\AppData\Roaming\npm\node_modules\@opencode\cli\bin\opencode.exe`
 
 ### 1. 빌드
 
@@ -45,11 +51,11 @@ npm run build
 
 서버 설정 경로는 코드에 고정되어 있습니다.
 
-- 설정: `C:\AiCtrl\Server\config\server.yaml`
-- 오버라이드: `C:\AiCtrl\Server\config\server.overrides.yaml` (선택)
-- 시크릿: `C:\AiCtrl\Server\config\secrets.bin` (Windows DPAPI, LocalMachine)
-- DB: `C:\AiCtrl\Server\data\aictrl.db`
-- 전송 파일: `C:\AiCtrl\Server\data\transfers`
+- 설정: `C:\AiCtrl\AgentServer\config\server.yaml`
+- 오버라이드: `C:\AiCtrl\AgentServer\config\server.overrides.yaml` (선택)
+- 시크릿: `C:\AiCtrl\AgentServer\config\secrets.bin` (Windows DPAPI, LocalMachine)
+- DB: `C:\AiCtrl\AgentServer\data\aictrl.db`
+- 전송 파일: `C:\AiCtrl\AgentServer\data\transfers`
 
 `server.yaml`에 `auth.googleClientId`와 `auth.allowedEmails`를 설정합니다. Google 클라이언트 시크릿은 파일에 쓰지 않고 DPAPI 저장소에 넣습니다.
 
@@ -83,13 +89,15 @@ dotnet run --project src\AI-Ctrl-Agent.Server
 ### 4. 에이전트 실행
 
 ```powershell
-dotnet run --project src\AI-Ctrl-Agent.Client
+C:\AiCtrl\Start-Agent.ps1
 ```
+
+개발 중에는 `dotnet run --project src\AI-Ctrl-Agent.Client`를 사용해도 됩니다. 빌드 시 배포 타깃이 실행되므로 `C:\AiCtrl\Agent\bin`에도 산출물이 복사됩니다. 실행 스크립트는 `C:\AiCtrl\Start-Agent.ps1`에 있습니다.
 
 에이전트는 시작 시 다음을 수행합니다.
 
-1. `%APPDATA%\AiCtrl\client.yaml`이 없으면 기본값으로 생성
-2. `%LOCALAPPDATA%\AiCtrl\client.db` 초기화 및 중단된 명령 복구
+1. `C:\AiCtrl\Agent\config\client.yaml`이 없으면 기본값으로 생성
+2. `C:\AiCtrl\Agent\data\client.db` 초기화 및 중단된 명령 복구
 3. OpenCode 백엔드 기동 또는 기존 인스턴스 채택
 4. 로컬 API `127.0.0.1:47800` 시작
 5. 서버 링크 연결 시도
@@ -145,10 +153,10 @@ Google Cloud Console의 승인된 리디렉션 URI에는 실제로 사용하는 
 
 | 목적 | 명령 | 비고 |
 | --- | --- | --- |
-| 전체 빌드 | `dotnet build AI-Ctrl-Agent.sln -c Release` | 경고를 오류로 처리 |
+| 전체 빌드 | `dotnet build AI-Ctrl-Agent.sln -c Release` | 경고를 오류로 처리. 빌드 후 `C:\AiCtrl`에 자동 배포 |
 | 전체 테스트 | `dotnet test -c Release` | Microsoft.Testing.Platform, xUnit v3 |
-| 서버 실행 | `dotnet run --project src\AI-Ctrl-Agent.Server` | 설정은 `C:\AiCtrl\Server\config\server.yaml` |
-| 에이전트 실행 | `dotnet run --project src\AI-Ctrl-Agent.Client` | 등록 전에는 서버 링크 유휴 |
+| 서버 실행 | `C:\AiCtrl\Start-AgentServer.ps1` | 배포된 `AgentServer\bin` 실행 |
+| 에이전트 실행 | `C:\AiCtrl\Start-Agent.ps1` | 배포된 `Agent\bin` 실행 |
 | 에이전트 등록 | `AI-Ctrl-Agent.Client.exe enroll --code XXXX-XXXX` | 등록 후 에이전트 재시작 |
 | VPN 헬퍼 | `AI-Ctrl-Agent.Client.exe --vpn-helper` | named pipe 서버 모드 |
 | 서버 시크릿 | `AI-Ctrl-Agent.Server.exe secrets set <name>` | `google-client-secret` |
@@ -158,6 +166,13 @@ Google Cloud Console의 승인된 리디렉션 URI에는 실제로 사용하는 
 | 웹 린트 | `npm run lint` | oxlint |
 | 웹 단위 테스트 | `npm run test` | Vitest + MSW |
 | 웹 E2E | `npm run test:e2e` | Playwright, 기본 mock 모드 |
+| 서비스 빌드·배포 | `dotnet build AI-Ctrl-Agent.sln -c Release` | 서비스 exe는 `C:\AiCtrl\OpenCode\bin`에 복사 |
+| 서비스만 빌드 | `C:\AiCtrl\Build-Service.bat` | `Build-OpenCodeService.ps1`이 csproj를 빌드 |
+| OpenCode 서비스 설치 | `C:\AiCtrl\Install-Service.bat` | UAC + Windows 계정 비밀번호, 자체 점검 후 전환 |
+| OpenCode 서비스 제거 | `C:\AiCtrl\Remove-Service.bat` | `-RestoreTask`로 예약 작업 복구 |
+| 예약 작업 폴백 등록 | `C:\AiCtrl\Register-Service.bat` | 서비스 미설치 상태에서만 동작 |
+| 예약 작업 폴백 해제 | `C:\AiCtrl\Unregister-Service.bat` | 서비스 설치 상태에서는 거부 |
+| OpenCode 서비스 상태 | `Get-Service AI-Ctrl-OpenCodeServer` | 4096 리스닝과 `service.log` 확인 |
 | 정리 | `Clean.bat` | bin/obj/node_modules/dist 삭제 |
 
 ## 포트
@@ -176,20 +191,24 @@ Google Cloud Console의 승인된 리디렉션 URI에는 실제로 사용하는 
 
 | 대상 | 경로 |
 | --- | --- |
-| 서버 설정 | `C:\AiCtrl\Server\config\server.yaml` |
-| 서버 시크릿 | `C:\AiCtrl\Server\config\secrets.bin` |
-| 서버 DB | `C:\AiCtrl\Server\data\aictrl.db` |
-| 서버 전송 | `C:\AiCtrl\Server\data\transfers` |
-| 클라이언트 설정 | `%APPDATA%\AiCtrl\client.yaml` |
-| 클라이언트 오버라이드 | `%APPDATA%\AiCtrl\client.overrides.yaml` |
-| 클라이언트 DB | `%LOCALAPPDATA%\AiCtrl\client.db` |
-| 로컬 API 토큰 | `%LOCALAPPDATA%\AiCtrl\local-token` |
-| 클라이언트 시크릿 | `%LOCALAPPDATA%\AiCtrl\secrets.bin` (DPAPI, CurrentUser) |
-| VPN 헬퍼 토큰 | `%LOCALAPPDATA%\AiCtrl\vpn-helper.token` |
-| VPN 정책 | `%LOCALAPPDATA%\AiCtrl\vpn-policy.json` |
-| 로그 | `<실행 파일 디렉터리>\logs\yyyyMMdd-HHmmss-{Server|Client}.txt` |
+| 서버 설정 | `C:\AiCtrl\AgentServer\config\server.yaml` |
+| 서버 시크릿 | `C:\AiCtrl\AgentServer\config\secrets.bin` |
+| 서버 DB | `C:\AiCtrl\AgentServer\data\aictrl.db` |
+| 서버 전송 | `C:\AiCtrl\AgentServer\data\transfers` |
+| 클라이언트 설정 | `C:\AiCtrl\Agent\config\client.yaml` |
+| 클라이언트 오버라이드 | `C:\AiCtrl\Agent\config\client.overrides.yaml` |
+| 클라이언트 DB | `C:\AiCtrl\Agent\data\client.db` |
+| 로컬 API 토큰 | `C:\AiCtrl\Agent\data\local-token` |
+| 클라이언트 시크릿 | `C:\AiCtrl\Agent\data\secrets.bin` (DPAPI, CurrentUser) |
+| VPN 헬퍼 토큰 | `C:\AiCtrl\Agent\data\vpn-helper.token` |
+| VPN 정책 | `C:\AiCtrl\Agent\data\vpn-policy.json` |
+| OpenCode 서비스 실행 파일 | `C:\AiCtrl\OpenCode\bin\AiCtrlOpenCodeService.exe` |
+| OpenCode 서비스 설정 | `C:\AiCtrl\OpenCode\bin\AiCtrlOpenCodeService.ini` |
+| OpenCode 서비스 로그 | `C:\AiCtrl\OpenCode\logs\service.log` |
+| 운영 스크립트 | `C:\AiCtrl\*.ps1`, `C:\AiCtrl\*.bat` |
+| 로그 | `C:\AiCtrl\Agent\logs\yyyyMMdd-HHmmss-Client.txt`, `C:\AiCtrl\AgentServer\logs\yyyyMMdd-HHmmss-Server.txt` |
 
-로그 디렉터리는 `AICTRL_LOG_DIR` 환경변수로 덮어쓸 수 있습니다. 기본 보존은 30일, 총 5GB입니다.
+로그 디렉터리는 각 YAML의 `logging.directory`로 지정하며, `AICTRL_LOG_DIR` 환경변수가 우선합니다. 기본 보존은 30일, 총 5GB입니다. 빌드 산출물은 자동으로 `C:\AiCtrl\Agent\bin`, `C:\AiCtrl\AgentServer\bin`, `C:\AiCtrl\OpenCode\bin`에 배포됩니다. 자세한 로컬 규칙은 `AGENTS.local.md`를 따릅니다.
 
 ## 저장소 구조
 
@@ -207,6 +226,7 @@ AICtrlAgent/
     AI-Ctrl-Agent.ClientMCP/     stdio MCP 서버
     AI-Ctrl-Agent.ServerMCP/     빈 Generic Host
     AI-Ctrl-Agent.ApiClient/     로컬 API 클라이언트
+    AI-Ctrl-Agent.OpenCodeService/  OpenCode Windows 서비스 호스트 (net48)
   tests/
     AI-Ctrl-Agent.Tests/         xUnit v3 테스트
     AI-Ctrl-Agent.FakeOpenCode/  테스트용 가짜 OpenCode 서버
@@ -220,8 +240,11 @@ AICtrlAgent/
     operations.md
     config-reference.md
     development.md
+    opencode-service.md
     verification/opencode-1.18.34-gates.md
 ```
+
+운영 스크립트는 저장소에 두지 않고 배포 루트 `C:\AiCtrl`에 있습니다. 서비스 소스는 `src/AI-Ctrl-Agent.OpenCodeService`에 있습니다.
 
 ## 런타임 구조
 
@@ -245,6 +268,21 @@ OpenCode serve
 - 이벤트: 클라이언트 outbox에 영속되는 이벤트는 `vpn.state`뿐입니다. 세션 상태는 이벤트 소싱이 아니라 조회와 스트림으로 갱신됩니다.
 - 전송: 업로드는 브라우저 → 서버 chunk → `files.receive` 명령, 다운로드는 `files.send` 명령 → 에이전트 → 서버 chunk → 브라우저입니다.
 
+## OpenCode 서비스
+
+OpenCode `serve`는 Windows 서비스 `AI-Ctrl-OpenCodeServer`가 관리합니다. 예약 작업이 아니라 SCM 서비스이므로 사용자가 로그온하지 않아도 부팅 시 시작됩니다.
+
+- 호스트: `src/AI-Ctrl-Agent.OpenCodeService` (net48). `opencode serve --hostname 127.0.0.1 --port 4096`을 자식 프로세스로 실행하고, 자식이 종료되면 5초에서 최대 60초까지 백오프로 재시작합니다.
+- 실행 계정: 현재 Windows 사용자. DPAPI CurrentUser로 `C:\AiCtrl\Agent\data\secrets.bin`의 `opencode.serve.password`를 복호화해 `OPENCODE_SERVER_USERNAME`/`OPENCODE_SERVER_PASSWORD`로 전달합니다.
+- 설정: `C:\AiCtrl\OpenCode\bin\AiCtrlOpenCodeService.ini` (`Executable`, `ListenHost`, `Port`, `AgentHome`, `LogDirectory`, `Username`)
+- 로그: `C:\AiCtrl\OpenCode\logs\service.log`. 자식 stdout/stderr는 같은 폴더의 `yyyyMMdd-HHmmss-opencode.{out,err}.log`입니다.
+- 설치: `C:\AiCtrl\Install-Service.bat` (`Install-OpenCodeService.ps1`). 설치 전에 임시 서비스(포트 4098)로 자체 점검하고, 실패하면 기존 예약 작업을 유지하거나 롤백합니다.
+- 제거·복구: `C:\AiCtrl\Remove-Service.bat`, `C:\AiCtrl\Remove-Service.bat -RestoreTask`
+- 예약 작업 폴백: `C:\AiCtrl\Register-Service.bat`, `C:\AiCtrl\Unregister-Service.bat`, `C:\AiCtrl\OpenCodeServer.ps1`
+- 빌드: `dotnet build AI-Ctrl-Agent.sln -c Release` 또는 `C:\AiCtrl\Build-Service.bat`. `Directory.Build.props`의 `AiCtrlDeploy` 타깃이 exe를 `C:\AiCtrl\OpenCode\bin`으로 복사합니다.
+
+서비스 소스는 저장소의 `src/AI-Ctrl-Agent.OpenCodeService`에 있고, 실행 파일·설정·로그와 운영 스크립트는 `C:\AiCtrl`에 있습니다. 스크립트는 저장소 경로를 `-RepoRoot` 또는 `AICTRL_REPO` 환경변수로 찾으며 기본값은 `C:\Users\jdyun\Desktop\Programming\Dev\AICtrlAgent`입니다. 상세 절차는 `docs/opencode-service.md`를 참조하십시오.
+
 ## 계약 요약
 
 - REST prefix: `/api/v1`
@@ -256,7 +294,7 @@ OpenCode serve
 - 응답 봉투: `{ data, meta }`. `meta.source`, `meta.stale`, `meta.asOf` 포함
 - 오류: RFC 7807 ProblemDetails + `code`
 
-지원 Query는 15종, 클라이언트가 실제 처리하는 Command는 14종입니다. 전체 목록과 미지원 항목은 `docs/server.md`, `docs/client.md`를 참조하십시오.
+지원 Query는 15종, 클라이언트가 실제 처리하는 Command는 15종입니다. 전체 목록과 미지원 항목은 `docs/server.md`, `docs/client.md`를 참조하십시오.
 
 ## 보안 규칙
 
@@ -276,6 +314,7 @@ OpenCode serve
 - 테스트: `dotnet test -c Release`
 - 웹 검증: `npm run typecheck`, `npm run lint`, `npm run test`
 - `TreatWarningsAsErrors=true`입니다. 경고를 남기지 마십시오.
+- `AI-Ctrl-Agent.OpenCodeService`는 유일한 net48 프로젝트입니다. `ServiceBase` 호스팅 때문에 SDK 스타일 그대로 두되 `TargetFramework=net48`, `Nullable=disable`, `ImplicitUsings=disable`을 유지합니다.
 - `bin`, `obj`, `dist`, `node_modules`는 직접 수정하지 않습니다.
 - JSON은 `AcJsonContext`의 source-generated serializer를 사용합니다. 새 DTO를 추가하면 컨텍스트 등록도 필요합니다.
 - 설정 키를 추가할 때는 반드시 옵션 클래스의 `FromConfiguration`에서 읽도록 배선합니다. 기본 YAML에만 키를 추가하면 소비되지 않습니다.
@@ -303,6 +342,9 @@ OpenCode serve
 8. `ServerMCP`는 MCP 서버가 아닙니다. 실제 MCP 도구는 `ClientMCP`에 있습니다.
 9. 기본 YAML의 일부 키는 코드에서 소비되지 않습니다. `docs/config-reference.md`의 미소비 목록을 확인하십시오.
 10. 서버 `query_cache`는 자동 정리되지 않습니다. 페이로드가 캐시 키에 포함되어 cursor·limit 조회마다 행이 늘어납니다.
+11. `AiCtrlOpenCodeService.exe`는 서비스가 실행 중이면 파일이 잠겨 있어 `dotnet build`의 자동 배포가 경고만 남기고 건너뜁니다. 배포하려면 서비스를 중지한 뒤 빌드하십시오.
+12. Windows 계정 비밀번호를 변경하면 `AI-Ctrl-OpenCodeServer`가 1069(로그온 실패)로 시작하지 않습니다. SCM에 저장된 자격 증명을 `sc.exe config`로 갱신해야 합니다.
+13. 운영 스크립트는 `C:\AiCtrl` 루트에 있고 서비스 소스는 저장소에 있습니다. 스크립트를 다른 위치로 옮기면 `-RepoRoot` 기본값이 어긋나 빌드가 실패하므로 `AICTRL_REPO` 환경변수를 설정하거나 `-RepoRoot`를 지정하십시오.
 
 ## 문서
 
@@ -315,12 +357,14 @@ OpenCode serve
 | `docs/operations.md` | 초기 설정, 등록, 재시작, 배포, 진단 |
 | `docs/config-reference.md` | 서버·클라이언트 설정 키와 실제 소비 여부 |
 | `docs/development.md` | 빌드·테스트·CI, 코드 규칙, 알려진 결함 |
+| `docs/opencode-service.md` | OpenCode Windows 서비스 구성, 설치·제거, 계정 비밀번호 갱신 |
 
 ## 현재 PC 설정 메모
 
 이 저장소를 이 PC에서 실행할 때 확인된 값입니다. 다른 환경에서는 경로가 달라질 수 있습니다.
 
-- `%APPDATA%\AiCtrl\client.yaml`의 `opencode.executable`을 `C:\Users\<user>\AppData\Roaming\npm\node_modules\opencode-ai\bin\opencode.exe`로 지정해야 백엔드가 시작됩니다.
+- `C:\AiCtrl\Agent\config\client.yaml`의 `opencode.executable`을 `C:\Users\<user>\AppData\Roaming\npm\node_modules\@opencode\cli\bin\opencode.exe`로 지정해야 백엔드가 시작됩니다.
+- OpenCode 로컬 서버(4096)는 Windows 서비스 `AI-Ctrl-OpenCodeServer`가 부팅 시 자동 기동합니다. 설치·제거는 `C:\AiCtrl\Install-Service.bat`, `C:\AiCtrl\Remove-Service.bat`을 사용하고, 자세한 내용은 `docs/opencode-service.md`와 `AGENTS.local.md`를 따릅니다.
 - Node.js가 PATH에 없으므로 웹 명령은 `C:\_Dev\node-22`를 PATH 앞에 추가하거나 전체 경로로 실행합니다.
 - `server.yaml`의 `web.distPath`는 `<repo>\web\ai-ctrl-web\dist`입니다.
 - Google 로그인 리디렉션 URI는 `http://127.0.0.1:5080/signin-google` 기준으로 등록되어 있어야 합니다.

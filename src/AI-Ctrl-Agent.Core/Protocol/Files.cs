@@ -51,3 +51,31 @@ public sealed record FilePreviewView(
     string? Text,
     string? Base64,
     bool Truncated);
+
+public sealed record FsBrowseQuery(string? Path);
+
+public sealed record FsDriveView(
+    string Path,
+    string Name,
+    string? Label,
+    bool Ready,
+    long? TotalBytes,
+    long? FreeBytes);
+
+public sealed record FsEntryView(
+    string Name,
+    string FullPath,
+    bool IsDir,
+    bool Denied,
+    bool IsReparsePoint);
+
+public sealed record FsQuickPathView(
+    string Key,
+    string Path);
+
+public sealed record FsBrowseView(
+    string? Path,
+    string? ParentPath,
+    List<FsDriveView> Drives,
+    List<FsEntryView> Entries,
+    List<FsQuickPathView> QuickPaths);

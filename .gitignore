@@ -1,5 +1,6 @@
 bin/
 obj/
+AGENTS.local.md
 [Dd]ebug/
 [Rr]elease/
 x64/

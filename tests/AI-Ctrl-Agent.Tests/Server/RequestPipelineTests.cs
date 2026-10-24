@@ -162,6 +162,101 @@ public sealed class RequestPipelineTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Fs_browse_proxy_returns_drives_and_entries()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        string? queriedType = null;
+        string? queriedPath = null;
+        _agent.Responder = packet =>
+        {
+            queriedType = packet.Type;
+            queriedPath = packet.Payload.GetProperty("path").GetString();
+            return Task.FromResult<ResponsePacket?>(Response(
+                packet,
+                JsonDocument.Parse(
+                    """{"path":"C:\\Work","parentPath":"C:\\","drives":[],"entries":[{"name":"demo","fullPath":"C:\\Work\\demo","isDir":true,"denied":false,"isReparsePoint":false}]}""")
+                    .RootElement.Clone()));
+        };
+
+        using var response = await _browser.GetAsync(
+            $"/api/v1/machines/{_machineId.Value}/fs?path=C%3A%5CWork",
+            ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, body);
+        using var parsed = JsonDocument.Parse(body);
+        parsed.RootElement.GetProperty("data").GetProperty("entries").GetArrayLength().ShouldBe(1);
+        queriedType.ShouldBe(QueryTypes.FsBrowse);
+        queriedPath.ShouldBe(@"C:\Work");
+    }
+
+    [Fact]
+    public async Task Fs_browse_without_path_requests_drive_listing()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        string? queriedPath = "unset";
+        _agent.Responder = packet =>
+        {
+            queriedPath = packet.Payload.GetProperty("path").GetString();
+            return Task.FromResult<ResponsePacket?>(Response(
+                packet,
+                JsonDocument.Parse(
+                    """{"path":null,"parentPath":null,"drives":[{"path":"C:\\","name":"C:\\","label":"System","ready":true,"totalBytes":1024,"freeBytes":512}],"entries":[]}""")
+                    .RootElement.Clone()));
+        };
+
+        using var response = await _browser.GetAsync(
+            $"/api/v1/machines/{_machineId.Value}/fs",
+            ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, body);
+        using var parsed = JsonDocument.Parse(body);
+        parsed.RootElement.GetProperty("data").GetProperty("drives").GetArrayLength().ShouldBe(1);
+        queriedPath.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Fs_browse_missing_path_returns_bad_request()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        _agent.Responder = packet => Task.FromResult<ResponsePacket?>(new ResponsePacket(
+            packet.RequestId,
+            ResponseStatus.Failed,
+            null,
+            AcErrorCodes.PathInvalid,
+            "Directory was not found.",
+            TimeProvider.System.GetUtcNow(),
+            1));
+
+        using var response = await _browser.GetAsync(
+            $"/api/v1/machines/{_machineId.Value}/fs?path=C%3A%5CMissing",
+            ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest, body);
+        body.ShouldContain(AcErrorCodes.PathInvalid);
+    }
+
+    [Fact]
+    public async Task Fs_browse_denied_path_returns_forbidden()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        _agent.Responder = packet => Task.FromResult<ResponsePacket?>(new ResponsePacket(
+            packet.RequestId,
+            ResponseStatus.Failed,
+            null,
+            AcErrorCodes.PathDenied,
+            "The directory is always denied.",
+            TimeProvider.System.GetUtcNow(),
+            1));
+
+        using var response = await _browser.GetAsync(
+            $"/api/v1/machines/{_machineId.Value}/fs?path=C%3A%5CAiCtrl%5CAgent",
+            ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
+        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden, body);
+        body.ShouldContain(AcErrorCodes.PathDenied);
+    }
+
+    [Fact]
     public async Task Workspace_register_dispatches_command_to_agent()
     {
         var ct = TestContext.Current.CancellationToken;
@@ -240,6 +335,40 @@ public sealed class RequestPipelineTests : IAsyncLifetime
         var results = await Task.WhenAll(first, second);
         results.ShouldAllBe(result => result.Success);
         _agent.RequestCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Create_session_issues_session_create_command()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        RequestPacket? seen = null;
+        _agent.Responder = packet =>
+        {
+            seen = packet;
+            return Task.FromResult<ResponsePacket?>(Response(
+                packet,
+                JsonDocument.Parse("""{"ok":true}""").RootElement.Clone()));
+        };
+        var url = $"/api/v1/machines/{_machineId.Value}/sessions?instance=opencode%3Atest&wait=5";
+        var body = new SessionCreateBody("ws_1", "New chat", "hello", null);
+        using var request = new HttpRequestMessage(HttpMethod.Post, url)
+        {
+            Content = JsonContent.Create(body, AcJsonContext.Default.SessionCreateBody),
+        };
+
+        using var response = await _browser.SendAsync(request, ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        _agent.RequestCount.ShouldBe(1);
+        seen.ShouldNotBeNull();
+        seen.Kind.ShouldBe(RequestKind.Command);
+        seen.Type.ShouldBe(CommandTypes.SessionCreate);
+        var payload = seen.Payload.Deserialize(AcJsonContext.Default.SessionCreatePayload);
+        payload.ShouldNotBeNull();
+        payload.Instance.Value.ShouldBe("opencode:test");
+        payload.WorkspaceId.ShouldBe("ws_1");
+        payload.Title.ShouldBe("New chat");
+        payload.InitialPrompt.ShouldBe("hello");
     }
 
     [Fact]

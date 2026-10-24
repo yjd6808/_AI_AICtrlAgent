@@ -253,6 +253,9 @@ public sealed class ServerDb
             appliedSeq = maxSeq;
         }
 
+        var entity = await db.MachineVpnStates
+            .SingleOrDefaultAsync(x => x.MachineId == machineId, ct)
+            .ConfigureAwait(false);
         VpnStatusView? vpnState = null;
         foreach (var envelope in events
                      .Where(x => x.Seq > machine.LastAppliedEventSeq && x.Type == AgentEventTypes.VpnState)
@@ -273,9 +276,6 @@ public sealed class ServerDb
                 continue;
             }
 
-            var entity = await db.MachineVpnStates
-                .SingleOrDefaultAsync(x => x.MachineId == machineId, ct)
-                .ConfigureAwait(false);
             if (entity is null)
             {
                 entity = new MachineVpnStateEntity { MachineId = machineId };

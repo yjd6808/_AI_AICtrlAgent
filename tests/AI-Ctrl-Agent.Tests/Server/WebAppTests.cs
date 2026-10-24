@@ -40,11 +40,15 @@ public sealed class WebAppTests : IAsyncLifetime
     public async Task Root_and_spa_routes_serve_the_index()
     {
         var ct = TestContext.Current.CancellationToken;
-        var root = await _client.GetStringAsync("/", ct);
+        using var rootResponse = await _client.GetAsync("/", ct);
+        var root = await rootResponse.Content.ReadAsStringAsync(ct);
         var route = await _client.GetStringAsync("/m/machine-1/agents/opencode", ct);
 
-        root.ShouldContain("AI-Ctrl");
-        route.ShouldContain("AI-Ctrl");
+        rootResponse.StatusCode.ShouldBe(HttpStatusCode.OK);
+        rootResponse.Content.Headers.ContentType?.MediaType.ShouldBe("text/html");
+        // Exact match: the missing-dist probe string also contains "AI-Ctrl".
+        root.ShouldBe("<html><body>AI-Ctrl</body></html>");
+        route.ShouldBe("<html><body>AI-Ctrl</body></html>");
     }
 
     [Fact]

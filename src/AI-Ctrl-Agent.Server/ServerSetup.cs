@@ -138,6 +138,8 @@ public static class ServerSetup
         app.UseAuthentication();
         app.UseAuthorization();
         app.UseRateLimiter();
+        // Keep "/" out of the endpoint table. An explicit root endpoint shadows the SPA
+        // fallback, so a successful login would land on the probe string instead of the UI.
         app.UseAcWebApp(webDist);
         app.MapAcServerEndpoints();
         app.MapHub<AgentHub>("/hubs/agent", options =>
@@ -145,7 +147,6 @@ public static class ServerSetup
             options.Transports = Microsoft.AspNetCore.Http.Connections.HttpTransportType.WebSockets;
         });
         app.MapHub<UiHub>("/hubs/ui");
-        app.MapGet("/", () => "AI-Ctrl-Agent Server");
         return app;
     }
 }

@@ -12,6 +12,7 @@
 | 6 | `operations.md` | 초기 설정, 등록, 재시작, 배포, 진단 절차 |
 | 7 | `config-reference.md` | 설정 키별 실제 소비 여부와 기본값 |
 | 8 | `development.md` | 빌드·테스트·CI, 코드 규칙, 알려진 결함 |
+| 9 | `opencode-service.md` | OpenCode Windows 서비스 구성, 설치·제거, 계정 비밀번호 갱신 |
 
 ## 문서 기준
 

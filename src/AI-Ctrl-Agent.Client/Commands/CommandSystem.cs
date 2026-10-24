@@ -269,6 +269,61 @@ public sealed class CommandSystem
                     }, ct).ConfigureAwait(false);
                 }
 
+                case CommandTypes.SessionCreate:
+                {
+                    var payload = JsonSerializer.Deserialize(envelope.Payload, AcJsonContext.Default.SessionCreatePayload);
+                    if (payload is null)
+                    {
+                        return CommandResult.Failure(AcErrorCodes.InvalidPayload, "session.create payload is required.");
+                    }
+
+                    var instance = Resolve(payload.Instance);
+                    if (instance is null)
+                    {
+                        return InstanceMissing(payload.Instance);
+                    }
+
+                    var workspace = string.IsNullOrWhiteSpace(payload.Directory)
+                        ? _files.GetWorkspace(payload.WorkspaceId ?? string.Empty)
+                        : null;
+                    var directory = workspace is null
+                        ? _files.ResolveSessionDirectory(payload.Directory ?? string.Empty)
+                        : workspace.Definition.Root;
+                    if (!Directory.Exists(directory))
+                    {
+                        return CommandResult.Failure(
+                            AcErrorCodes.PathInvalid,
+                            $"Workspace directory '{directory}' was not found.");
+                    }
+
+                    var session = await instance
+                        .CreateSessionAsync(new SessionCreateRequest(directory, payload.Title, payload.Model), ct)
+                        .ConfigureAwait(false);
+                    PromptAccepted? accepted = null;
+                    string? promptError = null;
+                    if (!string.IsNullOrWhiteSpace(payload.InitialPrompt))
+                    {
+                        try
+                        {
+                            accepted = await instance
+                                .PromptAsync(
+                                    session.Ref.SessionId,
+                                    new PromptRequest(payload.InitialPrompt, payload.Model, Agent: null, envelope.CommandId),
+                                    ct)
+                                .ConfigureAwait(false);
+                        }
+                        catch (Exception ex) when (ex is not OperationCanceledException)
+                        {
+                            promptError = ex.Message;
+                            _logger.LogWarning(ex, "Session {SessionId} was created but the initial prompt failed.", session.Ref.SessionId);
+                        }
+                    }
+
+                    var created = new SessionCreateResult(session, accepted, promptError);
+                    return CommandResult.Success(
+                        JsonSerializer.SerializeToElement(created, AcJsonContext.Default.SessionCreateResult));
+                }
+
                 case CommandTypes.SessionAbortAndPrompt:
                 {
                     var payload = JsonSerializer.Deserialize(envelope.Payload, AcJsonContext.Default.SessionAbortAndPromptPayload);
@@ -382,6 +437,35 @@ public sealed class CommandSystem
                     var policy = await _vpn.SetPolicyAsync(payload, ct).ConfigureAwait(false);
                     return CommandResult.Success(
                         JsonSerializer.SerializeToElement(policy, AcJsonContext.Default.VpnPolicyView));
+                }
+
+                case CommandTypes.VpnRecoverySet:
+                {
+                    var payload = JsonSerializer.Deserialize(
+                        envelope.Payload,
+                        AcJsonContext.Default.VpnRecoveryUpdatePayload);
+                    if (payload is null)
+                    {
+                        return CommandResult.Failure(
+                            AcErrorCodes.InvalidPayload,
+                            "vpn.recovery.set payload is required.");
+                    }
+
+                    if (_vpn is null)
+                    {
+                        return CommandResult.Failure(AcErrorCodes.CapabilityMissing, "VPN is not available.");
+                    }
+
+                    try
+                    {
+                        var recovery = await _vpn.SetRecoveryAsync(payload, ct).ConfigureAwait(false);
+                        return CommandResult.Success(
+                            JsonSerializer.SerializeToElement(recovery, AcJsonContext.Default.VpnRecoveryView));
+                    }
+                    catch (VpnException ex)
+                    {
+                        return CommandResult.Failure(ex.Code, ex.Message);
+                    }
                 }
 
                 case CommandTypes.FilesMkdir:

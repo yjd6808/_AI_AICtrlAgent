@@ -10,6 +10,27 @@
     <Version>0.1.0</Version>
     <Company>yjd6808</Company>
     <Product>AI-Ctrl-Agent</Product>
+    <AiCtrlRoot Condition="'$(AiCtrlRoot)' == ''">C:\AiCtrl</AiCtrlRoot>
+    <AiCtrlDeployOnBuild Condition="'$(AiCtrlDeployOnBuild)' == ''">true</AiCtrlDeployOnBuild>
   </PropertyGroup>
+
+  <Target Name="AiCtrlDeploy"
+          AfterTargets="Build"
+          Condition="'$(AiCtrlDeployOnBuild)' == 'true' and '$(DesignTimeBuild)' != 'true' and ('$(MSBuildProjectName)' == 'AI-Ctrl-Agent.Client' or '$(MSBuildProjectName)' == 'AI-Ctrl-Agent.Server' or '$(MSBuildProjectName)' == 'AI-Ctrl-Agent.OpenCodeService')">
+    <PropertyGroup>
+      <AiCtrlDeployDir Condition="'$(MSBuildProjectName)' == 'AI-Ctrl-Agent.Client'">$(AiCtrlRoot)\Agent\bin</AiCtrlDeployDir>
+      <AiCtrlDeployDir Condition="'$(MSBuildProjectName)' == 'AI-Ctrl-Agent.Server'">$(AiCtrlRoot)\AgentServer\bin</AiCtrlDeployDir>
+      <AiCtrlDeployDir Condition="'$(MSBuildProjectName)' == 'AI-Ctrl-Agent.OpenCodeService'">$(AiCtrlRoot)\OpenCode\bin</AiCtrlDeployDir>
+    </PropertyGroup>
+    <ItemGroup>
+      <AiCtrlDeployFiles Include="$(TargetDir)**\*" />
+    </ItemGroup>
+    <MakeDir Directories="$(AiCtrlDeployDir)" />
+    <Copy SourceFiles="@(AiCtrlDeployFiles)"
+          DestinationFiles="@(AiCtrlDeployFiles->'$(AiCtrlDeployDir)\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true"
+          ContinueOnError="WarnAndContinue" />
+    <Message Importance="high" Text="AI-Ctrl deployment: $(TargetDir) -> $(AiCtrlDeployDir)" />
+  </Target>
 
 </Project>

@@ -217,6 +217,21 @@ public sealed partial class VpnSystem : IAcSystem
             .ConfigureAwait(false);
     }
 
+    public async Task<VpnRecoveryView> GetRecoveryAsync(CancellationToken ct)
+    {
+        var store = PolicyStoreOrThrow();
+        return await store.GetRecoveryViewAsync(ct).ConfigureAwait(false);
+    }
+
+    public async Task<VpnRecoveryView> SetRecoveryAsync(
+        VpnRecoveryUpdatePayload update,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(update);
+        var store = PolicyStoreOrThrow();
+        return await store.SaveRecoveryAsync(update, ct).ConfigureAwait(false);
+    }
+
     public async Task<IReadOnlyList<VpnServer>> GetServerCatalogAsync(
         bool refresh,
         CancellationToken ct)

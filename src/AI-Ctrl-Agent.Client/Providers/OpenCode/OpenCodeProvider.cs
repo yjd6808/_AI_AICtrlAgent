@@ -9,7 +9,8 @@ public sealed record OpenCodeProviderOptions(
     string Username,
     string Password,
     IReadOnlyList<string> Endpoints,
-    string? InstanceId = null);
+    string? InstanceId = null,
+    bool Managed = false);
 
 public sealed class OpenCodeProvider : ICodingAgentProvider
 {
@@ -90,7 +91,8 @@ public sealed class OpenCodeProvider : ICodingAgentProvider
                 sse,
                 http,
                 sseClient,
-                _time));
+                _time,
+                _options.Managed));
         }
 
         return instances;

@@ -16,6 +16,7 @@ import type {
   TransferStatusView,
   VpnCountryView,
   VpnPolicyView,
+  VpnRecoveryView,
   VpnServerPage,
   VpnServerRow,
   VpnStatusView,
@@ -247,7 +248,15 @@ export type MockCommand = {
   outcome: 'succeeded' | 'failed' | 'cancelled' | null
   sessionId: string | null
   promptText: string | null
-  mode: 'prompt' | 'abort' | 'abort-and-prompt' | 'refresh' | 'seed' | 'files' | 'vpn'
+  mode:
+    | 'prompt'
+    | 'abort'
+    | 'abort-and-prompt'
+    | 'refresh'
+    | 'seed'
+    | 'files'
+    | 'vpn'
+    | 'create'
   completed: boolean
 }
 
@@ -262,6 +271,7 @@ export type MockVpnState = {
   countries: VpnCountryView[]
   pages: Record<string, VpnServerPage>
   policy: VpnPolicyView
+  recovery: VpnRecoveryView
 }
 
 export type MockState = {
@@ -617,7 +627,31 @@ function seedVpn(now: number): MockVpnState {
     ],
   }
 
-  return { status, countries, pages, policy }
+  const recovery: VpnRecoveryView = {
+    enabled: false,
+    autoConnectVpn: true,
+    autoResume: true,
+    handleQuotaExceeded: true,
+    handleRateLimited: true,
+    handleAuthFailed: false,
+    handleModelUnavailable: false,
+    handleNetwork: true,
+    handleStalled: true,
+    handleUnknown: false,
+    continuationPrompt: 'Continue from where you stopped. Do not repeat completed work.',
+    country: null,
+    city: null,
+    servers: [],
+    cooldownSeconds: 600,
+    maxAttemptsPerSession: 3,
+    stallThresholdSeconds: 0,
+    discordEnabled: false,
+    discordNotifyOnFailureOnly: false,
+    discordWebhookConfigured: false,
+    updatedAt: new Date(now - 30 * minute).toISOString(),
+  }
+
+  return { status, countries, pages, policy, recovery }
 }
 
 export function createMockState(): MockState {

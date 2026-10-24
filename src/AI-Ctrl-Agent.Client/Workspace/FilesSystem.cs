@@ -31,11 +31,72 @@ public sealed class FilesSystem
 
     private readonly WorkspaceRegistry _workspaces;
 
+    private readonly string[] _hardDenyPaths;
+
     public FilesSystem(WorkspaceRegistry workspaces)
     {
         ArgumentNullException.ThrowIfNull(workspaces);
         _workspaces = workspaces;
+        _hardDenyPaths = WorkspacePathPolicy.CreateDefaultHardDenyPaths()
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(Path.GetFullPath)
+            .Select(Path.TrimEndingDirectorySeparator)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+    }
+
+    public FsBrowseView Browse(FsBrowseQuery query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        if (string.IsNullOrWhiteSpace(query.Path))
+        {
+            return new FsBrowseView(null, null, GetDrives(), [], GetQuickPaths());
+        }
+
+        var fullPath = ResolveDirectory(query.Path);
+        var entries = new List<FsEntryView>();
+        try
+        {
+            foreach (var info in new DirectoryInfo(fullPath).EnumerateDirectories())
+            {
+                entries.Add(new FsEntryView(
+                    info.Name,
+                    Path.TrimEndingDirectorySeparator(info.FullName),
+                    IsDir: true,
+                    IsDeniedPath(info.FullName),
+                    (info.Attributes & FileAttributes.ReparsePoint) != 0));
+            }
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // 하위 폴더를 읽을 수 없으면 빈 목록을 반환합니다.
+        }
+        catch (IOException)
+        {
+            // 이동식 드라이브 분리 등으로 열거가 중단되면 지금까지 수집한 항목만 반환합니다.
+        }
+
+        entries.Sort((left, right) => string.Compare(left.Name, right.Name, StringComparison.OrdinalIgnoreCase));
+        return new FsBrowseView(
+            fullPath,
+            Directory.GetParent(fullPath)?.FullName is { } parent
+                ? Path.TrimEndingDirectorySeparator(parent)
+                : null,
+            [],
+            entries,
+            []);
+    }
+
+    public string ResolveSessionDirectory(string path)
+    {
+        var fullPath = ResolveDirectory(path);
+        if (!IsDeniedPath(fullPath))
+        {
+            return fullPath;
+        }
+
+        throw new WorkspaceException(AcErrorCodes.PathDenied, "The directory is always denied.");
     }
 
     public IReadOnlyList<WorkspaceInfo> GetWorkspaceInfos(IEnumerable<SessionSummary> sessions)
@@ -73,6 +134,8 @@ public sealed class FilesSystem
             entry.Definition.DenyPatterns,
             []);
     }
+
+    public WorkspaceEntry GetWorkspace(string workspaceId) => _workspaces.Get(workspaceId);
 
     public WorkspaceEntry Register(string path) => _workspaces.Register(path);
 
@@ -442,6 +505,190 @@ public sealed class FilesSystem
         if (!allowed)
         {
             throw new WorkspaceException(AcErrorCodes.WorkspaceNotAllowed, message);
+        }
+    }
+
+    private List<FsQuickPathView> GetQuickPaths()
+    {
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var candidates = new (string Key, string? Path)[]
+        {
+            ("desktop", Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)),
+            ("documents", Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)),
+            ("downloads", string.IsNullOrWhiteSpace(userProfile) ? null : Path.Combine(userProfile, "Downloads")),
+            ("profile", userProfile),
+            ("appdata", Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData)),
+            ("localappdata", Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)),
+        };
+
+        var quickPaths = new List<FsQuickPathView>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, path) in candidates)
+        {
+            if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+            {
+                continue;
+            }
+
+            string fullPath;
+            try
+            {
+                fullPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                continue;
+            }
+
+            if (IsDeniedPath(fullPath) || !seen.Add(fullPath))
+            {
+                continue;
+            }
+
+            quickPaths.Add(new FsQuickPathView(key, fullPath));
+        }
+
+        return quickPaths;
+    }
+
+    private static List<FsDriveView> GetDrives()
+    {
+        var drives = new List<FsDriveView>();
+        foreach (var drive in DriveInfo.GetDrives())
+        {
+            var ready = false;
+            string? label = null;
+            long? total = null;
+            long? free = null;
+            try
+            {
+                ready = drive.IsReady;
+                if (ready)
+                {
+                    label = drive.VolumeLabel;
+                    total = drive.TotalSize;
+                    free = drive.AvailableFreeSpace;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                ready = false;
+            }
+
+            drives.Add(new FsDriveView(
+                Path.TrimEndingDirectorySeparator(drive.RootDirectory.FullName),
+                drive.Name,
+                string.IsNullOrWhiteSpace(label) ? null : label,
+                ready,
+                total,
+                free));
+        }
+
+        drives.Sort((left, right) => string.Compare(left.Path, right.Path, StringComparison.OrdinalIgnoreCase));
+        return drives;
+    }
+
+    private string ResolveDirectory(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            throw new WorkspaceException(AcErrorCodes.PathInvalid, "A directory path is required.");
+        }
+
+        if (!Path.IsPathFullyQualified(path))
+        {
+            throw new WorkspaceException(AcErrorCodes.PathInvalid, $"'{path}' is not an absolute path.");
+        }
+
+        string fullPath;
+        try
+        {
+            fullPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            throw new WorkspaceException(AcErrorCodes.PathInvalid, $"'{path}' is not a valid path.");
+        }
+
+        var root = Path.GetPathRoot(fullPath);
+        if (string.IsNullOrEmpty(root))
+        {
+            throw new WorkspaceException(AcErrorCodes.PathInvalid, $"'{path}' is not a valid path.");
+        }
+
+        var current = Path.GetFullPath(root);
+        EnsureNotDenied(current);
+        var parts = fullPath[root.Length..]
+            .Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
+        foreach (var part in parts)
+        {
+            current = Path.Join(current, part);
+            if (!Directory.Exists(current))
+            {
+                throw new WorkspaceException(
+                    AcErrorCodes.PathInvalid,
+                    $"Directory '{path}' was not found.");
+            }
+
+            current = ResolveLinkTarget(current);
+            EnsureNotDenied(current);
+        }
+
+        return Path.TrimEndingDirectorySeparator(current);
+    }
+
+    private static string ResolveLinkTarget(string path)
+    {
+        var info = new DirectoryInfo(path);
+        if ((info.Attributes & FileAttributes.ReparsePoint) == 0)
+        {
+            return path;
+        }
+
+        FileSystemInfo? target;
+        try
+        {
+            target = info.ResolveLinkTarget(returnFinalTarget: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new WorkspaceException(AcErrorCodes.PathDenied, "The path crosses an unreadable link.");
+        }
+
+        return target is null
+            ? throw new WorkspaceException(AcErrorCodes.PathDenied, "The path crosses an unresolved link.")
+            : Path.TrimEndingDirectorySeparator(Path.GetFullPath(target.FullName));
+    }
+
+    private bool IsDeniedPath(string path)
+    {
+        string normalized;
+        try
+        {
+            normalized = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return true;
+        }
+
+        foreach (var denied in _hardDenyPaths)
+        {
+            if (string.Equals(normalized, denied, StringComparison.OrdinalIgnoreCase)
+                || normalized.StartsWith(denied + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void EnsureNotDenied(string path)
+    {
+        if (IsDeniedPath(path))
+        {
+            throw new WorkspaceException(AcErrorCodes.PathDenied, "The directory is always denied.");
         }
     }
 }

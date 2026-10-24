@@ -132,6 +132,30 @@ public sealed class OpenCodeProviderTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CreateSession_uses_directory_and_returns_summary()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var instance = await DiscoverSingleAsync(CreateProvider(), ct);
+
+        var created = await instance.CreateSessionAsync(
+            new SessionCreateRequest(@"C:\fake\ws\project", "새 채팅", null),
+            ct);
+
+        created.Ref.SessionId.ShouldStartWith("ses_");
+        created.Ref.Instance.ShouldBe(instance.Info.Id);
+        created.Title.ShouldBe("새 채팅");
+        created.Directory.ShouldBe(@"C:\fake\ws\project");
+        _server.State.SessionExists(created.Ref.SessionId).ShouldBeTrue();
+
+        var sessions = await instance.ListSessionsAsync(
+            new SessionQuery(instance.Info.Id, SessionListViews.All, IncludeChildren: true, null),
+            ct);
+        sessions.ShouldContain(summary => summary.Ref.SessionId == created.Ref.SessionId);
+
+        await instance.DisposeAsync();
+    }
+
+    [Fact]
     public async Task GetMessages_pages_with_offset_cursor()
     {
         var session = _server.State.SeedSession("paging");

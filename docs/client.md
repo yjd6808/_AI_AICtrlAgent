@@ -12,9 +12,9 @@
 
 ### 일반 시작 순서
 
-1. `%APPDATA%\AiCtrl\client.yaml` 생성·로드 (`client.yaml` → `client.overrides.yaml` → `AICTRL__` 환경변수)
+1. `C:\AiCtrl\Agent\config\client.yaml` 생성·로드 (`client.yaml` → `client.overrides.yaml` → `AICTRL__` 환경변수)
 2. 로그 초기화
-3. `%LOCALAPPDATA%\AiCtrl\client.db` 초기화 (WAL)
+3. `C:\AiCtrl\Agent\data\client.db` 초기화 (WAL)
 4. 중단된 journal 복구 (`RecoverInterruptedAsync`)
 5. 옵션과 저장소 생성
 6. DI 등록
@@ -61,7 +61,7 @@
 
 ```yaml
 opencode:
-  executable: 'C:\Users\<user>\AppData\Roaming\npm\node_modules\opencode-ai\bin\opencode.exe'
+  executable: 'C:\Users\<user>\AppData\Roaming\npm\node_modules\@opencode\cli\bin\opencode.exe'
   host: 127.0.0.1
   port: 4096
 ```
@@ -115,11 +115,13 @@ V1은 프리픽스 없음, V2는 `/api`를 사용합니다. `/doc`의 paths를 �
 | --- | --- |
 | `session.abort` | 세션 중단. 자식 포함 옵션 |
 | `session.prompt` | 프롬프트 전송 |
+| `session.create` | 지정 디렉터리 또는 워크스페이스 루트에 세션 생성. 첫 프롬프트 선택 |
 | `session.abort_and_prompt` | 중단 후 프롬프트 |
 | `session.permission.reply` | 권한 응답 |
 | `vpn.connect` | VPN 연결 |
 | `vpn.disconnect` | VPN 해제 |
 | `vpn.policy.set` | failover 정책 저장 |
+| `vpn.recovery.set` | 복구·재시작·Discord 설정 저장 |
 | `files.receive` | 서버 → 클라이언트 파일 수신 |
 | `files.send` | 클라이언트 → 서버 파일 송신 |
 | `files.mkdir` | 디렉터리 생성 |
@@ -130,9 +132,8 @@ V1은 프리픽스 없음, V2는 `/api`를 사용합니다. `/doc`의 paths를 �
 
 ### 미지원 명령
 
-다음 4종은 `unsupported_command`로 실패합니다.
+다음 3종은 `unsupported_command`로 실패합니다.
 
-- `session.create`
 - `machine.abort_all`
 - `opencode.backend.restart`
 - `power.keep_awake`
@@ -148,6 +149,8 @@ V1은 프리픽스 없음, V2는 `/api`를 사용합니다. `/doc`의 paths를 �
 7. `Progress`/`Respond` 전송, journal 갱신
 
 세션 단위 직렬화는 `SessionActorPool`과 `SessionActor`가 담당합니다. `session.abort`는 우선 처리됩니다. `abort_and_prompt`는 abort 대기 15초(재시도 5초), 500ms 폴링, prompt 확인 10초를 사용합니다.
+
+`session.create`는 `Directory`가 있으면 `ResolveSessionDirectory`로 절대 경로·존재 여부·reparse point·hard deny를 검사하고, 없으면 `WorkspaceId`를 `WorkspaceRegistry`로 해석해 루트 경로를 구합니다. 이후 `POST /session?directory=...`로 세션을 만듭니다. `InitialPrompt`가 있으면 생성된 세션에 즉시 프롬프트를 보내며 `MessageId`는 명령 ID에서 파생됩니다. 첫 프롬프트가 실패해도 세션 생성은 성공으로 기록하고 결과의 `promptError`에 오류를 남깁니다. 결과는 `SessionCreateResult`(`session`, `prompt`, `promptError`)입니다.
 
 `CommandEnvelope.ExpiresAt`는 journal에 복사되지만 실행 전에 검사하지 않습니다.
 
@@ -178,7 +181,7 @@ V1은 프리픽스 없음, V2는 `/api`를 사용합니다. `/doc`의 paths를 �
 ### 디바이스 키
 
 - ECDSA P-256
-- PKCS#8 개인키를 DPAPI로 암호화해 `agent.device.key` 이름으로 `%LOCALAPPDATA%\AiCtrl\secrets.bin`에 저장
+- PKCS#8 개인키를 DPAPI로 암호화해 `agent.device.key` 이름으로 `C:\AiCtrl\Agent\data\secrets.bin`에 저장
 - 서명 대상: `aictrl-agent-v1|{machineId}|{nonce}`
 
 ## 6. 로컬 API
@@ -189,7 +192,7 @@ V1은 프리픽스 없음, V2는 `/api`를 사용합니다. `/doc`의 paths를 �
 
 - Host가 `127.0.0.1` 또는 `localhost`이고 실제 포트와 일치해야 합니다.
 - `Authorization: Bearer <local-token>` 고정시간 비교
-- 토큰 파일: `%LOCALAPPDATA%\AiCtrl\local-token` (32바이트 난수의 hex)
+- 토큰 파일: `C:\AiCtrl\Agent\data\local-token` (32바이트 난수의 hex)
 - `localApi.port`를 0으로 지정하면 OS가 임의 포트를 배정합니다. 이 경우 `AICTRL_LOCAL_PORT`를 함께 맞춰야 합니다.
 
 ### 엔드포인트
@@ -242,7 +245,7 @@ V1은 프리픽스 없음, V2는 `/api`를 사용합니다. `/doc`의 paths를 �
 
 - `VpnSystem`이 ProtonVPN CLI 또는 helper를 통해 상태를 조회하고 연결·해제합니다.
 - `VpnRecoverySystem`은 오류·정지 이벤트에 반응해 재연결과 세션 재개를 수행합니다.
-- `VpnPolicyStore`는 `%LOCALAPPDATA%\AiCtrl\vpn-policy.json`에 정책을 저장합니다.
+- `VpnPolicyStore`는 `C:\AiCtrl\Agent\data\vpn-policy.json`에 정책을 저장합니다.
 
 ### 연결 규칙
 
@@ -258,19 +261,39 @@ V1은 프리픽스 없음, V2는 `/api`를 사용합니다. `/doc`의 paths를 �
 ### Helper
 
 - named pipe: `aictrl-vpn-{SID}`
-- 토큰: `%LOCALAPPDATA%\AiCtrl\vpn-helper.token`
+- 토큰: `C:\AiCtrl\Agent\data\vpn-helper.token`
 - op: `ping`, `status`, `countries`, `servers`, `connect`, `disconnect`
 - `--vpn-helper` 모드로 별도 프로세스를 실행합니다.
 
 ### 복구
 
-기본 비활성입니다. 활성화하면 다음 이벤트를 구독합니다.
+`VpnRecoverySystem`은 기본 비활성 상태로 시작하지만 이벤트 구독과 처리 루프는 항상 유지합니다. 활성 여부·트리거·쿨다운·프롬프트는 매 이벤트마다 `VpnPolicyStore`에서 읽으므로 웹에서 저장하면 에이전트를 재시작하지 않아도 다음 이벤트부터 적용됩니다.
+
+구독 이벤트는 다음과 같습니다.
 
 - `SessionErrorClassifiedEvent`
 - `SessionStalledEvent`
 - `SessionTurnCompletedEvent`
 
-트리거는 QuotaExceeded, RateLimited(옵션), Network→Stalled, Stall 이벤트입니다. 처리 순서는 알림 → 세션 abort → VPN connect → 세션 재개입니다. 세션별 쿨다운 10분, 최대 3회이며 성공 턴 완료 시 카운터를 초기화합니다. Discord webhook은 HTTPS만 허용합니다.
+`MonitorSystem`은 `None`, `Aborted`, `ToolError`를 제외한 모든 분류 오류를 `SessionErrorClassifiedEvent`로 발행합니다. 초기 오류뿐 아니라 retry 경로에서 분류된 오류도 같은 이벤트로 전달됩니다.
+
+트리거 플래그와 대상 오류는 다음과 같습니다.
+
+| 플래그 | 대상 |
+| --- | --- |
+| `HandleQuotaExceeded` | `QuotaExceeded` |
+| `HandleRateLimited` | `RateLimited` |
+| `HandleAuthFailed` | `AuthFailed` |
+| `HandleModelUnavailable` | `ModelUnavailable` |
+| `HandleNetwork` | `Network` 및 네트워크 retry |
+| `HandleStalled` | `SessionStalledEvent` |
+| `HandleUnknown` | `Unknown` |
+
+처리 순서는 Discord 알림 → 세션 abort → VPN connect(`AutoConnectVpn`) → 같은 세션 재개(`AutoResume`)입니다. 재개는 `AbortAndPromptRunner`로 `ContinuationPrompt`를 전송하며, 비어 있으면 기본 문장을 사용합니다. 세션별로 `CooldownSeconds`(기본 600초)와 `MaxAttemptsPerSession`(기본 3회)을 적용하고, 성공 턴이 완료되면 카운터를 초기화합니다. `StallThresholdSeconds`가 0이면 모든 정체 이벤트를 처리하고, 값이 있으면 해당 시간 이상 정체된 이벤트만 처리합니다.
+
+설정 우선순위는 `C:\AiCtrl\Agent\data\vpn-policy.json`의 `recovery` 블록이 먼저이고, 파일이 없거나 `recovery`가 없으면 `client.yaml`의 `vpn.recovery` 값이 기본값으로 사용됩니다. 저장은 `vpn.recovery` query와 `vpn.recovery.set` command로 수행합니다.
+
+Discord webhook URL은 `vpn-policy.json`에 기록하지 않습니다. `client.yaml`의 `vpn.recovery.discordWebhookUrl`은 폴백으로만 쓰고, 웹에서 저장한 값은 DPAPI secret store의 `vpn.recovery.discordWebhookUrl` 키에 보관합니다. 조회 응답에는 URL 대신 `discordWebhookConfigured`만 포함합니다. URL은 HTTPS이면서 `discord.com`, `discordapp.com`, `canary.discord.com`, `ptb.discord.com` 호스트의 `/api/webhooks/` 경로여야 합니다. `DiscordNotifyOnFailureOnly`가 true이면 복구 실패와 시도 초과만 전송합니다.
 
 ## 8. 워크스페이스와 파일
 
@@ -296,6 +319,16 @@ workspaces:
 - 등록은 `client.overrides.yaml`의 `registeredWorkspaces:N:*`에 기록됩니다.
 - 워크스페이스 ID는 정규화 경로의 SHA-256 앞 8자에 `ws_`를 붙입니다.
 
+### 파일 시스템 탐색
+
+`fs.browse` query는 워크스페이스 밖의 경로도 조회합니다. 새 세션의 워킹 디렉토리를 고르는 UI가 사용합니다.
+
+- `path`가 없으면 드라이브 목록(`drives`)과 자주 쓰는 위치(`quickPaths`)를 반환합니다. `quickPaths`는 데스크톱, 문서, 다운로드, 사용자 폴더, AppData(Roaming/Local) 중 실제로 존재하는 경로만 `key`와 절대 경로로 담습니다.
+- `path`가 있으면 `ResolveDirectory`로 정규화·존재 확인·reparse point 해석·hard deny 검사를 수행하고 하위 디렉터리만 반환합니다.
+- 응답에는 `path`, `parentPath`, `drives`, `entries`가 있습니다. 각 항목은 `name`, `fullPath`, `isDir`, `denied`, `isReparsePoint`입니다. 드라이브 목록 응답에는 `quickPaths`가 함께 옵니다.
+- hard deny 경로는 `denied=true`로 표시하고 UI가 확장을 막습니다. hard deny 경로를 직접 조회하면 `path_denied`, 없는 경로는 `path_invalid`입니다.
+- 파일은 나열하지 않습니다. 세션 디렉터리 선택 용도이기 때문입니다.
+
 ### 파일 정책
 
 `WorkspacePathPolicy`는 다음을 수행합니다.
@@ -306,7 +339,7 @@ workspaces:
 - 기본 deny 패턴 적용
 - hard deny 경로 차단
 
-기본 deny 패턴은 `.env`, `.env.*`, `*.pem`, `*.pfx`, `*.key`, `id_rsa*`, `.git/config`, `secrets.*`입니다. hard deny는 `%LOCALAPPDATA%\AiCtrl`와 `~/.local/share/opencode/auth.json`입니다.
+기본 deny 패턴은 `.env`, `.env.*`, `*.pem`, `*.pfx`, `*.key`, `id_rsa*`, `.git/config`, `secrets.*`입니다. hard deny는 `C:\AiCtrl\Agent`, `C:\AiCtrl\AgentServer`, `%LOCALAPPDATA%\AiCtrl`(이전 경로), `~/.local/share/opencode/auth.json`입니다.
 
 적용 범위에 차이가 있습니다.
 
@@ -326,7 +359,7 @@ workspaces:
 
 ## 9. 전송
 
-`TransferSystem`은 `%LOCALAPPDATA%\AiCtrl\transfers`를 임시 디렉터리로 사용합니다.
+`TransferSystem`은 `C:\AiCtrl\Agent\data\transfers`를 임시 디렉터리로 사용합니다.
 
 - 수신: 서버 transfer가 `direction=Upload`, `status=Ready`여야 합니다. workspace 일치와 `allowUpload`가 필요합니다. `.part`로 재개하고 크기·SHA-256을 검증합니다. 충돌 정책 `fail`, `overwrite`, `rename`을 적용합니다.
 - 송신: `allowDownload`가 필요합니다. 디렉터리는 `asZip=true`일 때만 허용합니다. 서버가 준 chunk 크기로 PUT합니다.
@@ -339,15 +372,15 @@ workspaces:
 
 | 대상 | 경로 |
 | --- | --- |
-| 설정 | `%APPDATA%\AiCtrl\client.yaml` |
-| 오버라이드 | `%APPDATA%\AiCtrl\client.overrides.yaml` |
-| DB | `%LOCALAPPDATA%\AiCtrl\client.db` |
-| 로컬 API 토큰 | `%LOCALAPPDATA%\AiCtrl\local-token` |
-| DPAPI 시크릿 | `%LOCALAPPDATA%\AiCtrl\secrets.bin` |
-| VPN helper 토큰 | `%LOCALAPPDATA%\AiCtrl\vpn-helper.token` |
-| VPN 정책 | `%LOCALAPPDATA%\AiCtrl\vpn-policy.json` |
-| VPN 이력 | `%LOCALAPPDATA%\AiCtrl\vpn-history.json` |
-| 전송 임시 | `%LOCALAPPDATA%\AiCtrl\transfers` |
+| 설정 | `C:\AiCtrl\Agent\config\client.yaml` |
+| 오버라이드 | `C:\AiCtrl\Agent\config\client.overrides.yaml` |
+| DB | `C:\AiCtrl\Agent\data\client.db` |
+| 로컬 API 토큰 | `C:\AiCtrl\Agent\data\local-token` |
+| DPAPI 시크릿 | `C:\AiCtrl\Agent\data\secrets.bin` |
+| VPN helper 토큰 | `C:\AiCtrl\Agent\data\vpn-helper.token` |
+| VPN 정책 | `C:\AiCtrl\Agent\data\vpn-policy.json` |
+| VPN 이력 | `C:\AiCtrl\Agent\data\vpn-history.json` |
+| 전송 임시 | `C:\AiCtrl\Agent\data\transfers` |
 | 로그 | 실행 파일 디렉터리 `\logs\yyyyMMdd-HHmmss-Client.txt` |
 
 ### 클라이언트 DB

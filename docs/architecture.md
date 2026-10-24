@@ -64,7 +64,7 @@ Server는 `server.yaml`의 `kestrel.endpoints`를 그대로 사용합니다. `la
 
 `ServerSetup.BuildAcServer`(`src/AI-Ctrl-Agent.Server/ServerSetup.cs:107`)가 다음 순서로 구성합니다.
 
-1. `C:\AiCtrl\Server\config\server.yaml` 생성·로드
+1. `C:\AiCtrl\AgentServer\config\server.yaml` 생성·로드
 2. `server.overrides.yaml` 병합 (선택)
 3. `AICTRL__` 환경변수 적용
 4. 로그 초기화와 Kestrel 구성
@@ -230,7 +230,7 @@ provider-host
 
 ### 서버 SQLite
 
-`C:\AiCtrl\Server\data\aictrl.db`
+`C:\AiCtrl\AgentServer\data\aictrl.db`
 
 | 테이블 | 내용 |
 | --- | --- |
@@ -248,7 +248,7 @@ EF migration은 사용하지 않습니다. `EnsureCreatedAsync`와 `CREATE TABLE
 
 ### 클라이언트 SQLite
 
-`%LOCALAPPDATA%\AiCtrl\client.db`
+`C:\AiCtrl\Agent\data\client.db`
 
 | 테이블 | 내용 |
 | --- | --- |
@@ -278,7 +278,7 @@ GeoGate는 로컬 포트(5080)를 완전히 우회합니다. edge 포트(5081)�
 - `ServerMCP`는 빈 Generic Host입니다. MCP 도구는 `ClientMCP`에만 있습니다.
 - 세션 상태는 이벤트 소싱이 아닙니다. 서버에 영속되는 이벤트는 VPN 상태뿐입니다.
 - 기본 YAML과 코드가 읽는 설정 키가 여러 곳에서 불일치합니다. `config-reference.md`를 참조하십시오.
-- Query 6종과 Command 4종은 클라이언트에서 미지원입니다.
+- Query 6종과 Command 3종은 클라이언트에서 미지원입니다.
 - 파일 deny 패턴은 미리보기에서만 차단되고 목록·해시·생성·삭제·이름변경에는 적용되지 않습니다. hard deny 경로는 모든 작업에 적용됩니다.
 - 웹 빌드는 CI에 포함되지 않습니다. `dist`는 저장소에 없습니다.
 

@@ -1,0 +1,259 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 72;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(3 7 12 / 72%);
+  backdrop-filter: blur(2px);
+}
+
+.dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(620px, 100%);
+  max-height: min(680px, calc(100vh - 40px));
+  padding: 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.title {
+  font-size: 17px;
+}
+
+.close {
+  display: inline-flex;
+  padding: 3px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-subtle);
+}
+
+.close:hover {
+  color: var(--text);
+}
+
+.hint {
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.pathBar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.pathInput {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.pathInput:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.error {
+  margin-top: 8px;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.tree {
+  flex: 1;
+  min-height: 180px;
+  margin-top: 12px;
+  padding: 6px 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.group + .group {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.groupTitle {
+  margin: 2px 12px 3px;
+  color: var(--text-subtle);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.node {
+  display: block;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  padding-right: 8px;
+}
+
+.row:hover {
+  background: rgb(31 43 61 / 45%);
+}
+
+.rowSelected {
+  background: rgb(63 182 168 / 14%);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex: none;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-subtle);
+}
+
+.chevron svg {
+  transition: transform 120ms ease;
+}
+
+.chevronOpen svg {
+  transform: rotate(90deg);
+}
+
+.chevron:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.chevron:disabled {
+  opacity: 0.35;
+}
+
+.icon {
+  flex: none;
+  color: var(--text-subtle);
+}
+
+.name {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 2px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.name:disabled {
+  color: var(--text-subtle);
+}
+
+.quickPath {
+  flex: 0 1 auto;
+  max-width: 46%;
+  margin-left: auto;
+  color: var(--text-subtle);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.denied {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgb(248 113 113 / 14%);
+  color: var(--danger);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.status,
+.statusError {
+  margin: 0;
+  padding: 3px 0;
+  font-size: 11px;
+}
+
+.status {
+  color: var(--text-subtle);
+}
+
+.statusError {
+  color: var(--danger);
+}
+
+.selected {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 12px;
+  min-width: 0;
+}
+
+.selectedLabel {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.selectedPath {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+@media (max-width: 420px) {
+  .actions {
+    flex-direction: column-reverse;
+  }
+
+  .actions > button {
+    width: 100%;
+  }
+}

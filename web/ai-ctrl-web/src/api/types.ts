@@ -258,6 +258,20 @@ export type PromptInput = {
   agent?: string | null
 }
 
+export type SessionCreateInput = {
+  workspaceId?: string | null
+  directory?: string | null
+  title?: string | null
+  initialPrompt?: string | null
+  model?: ModelRef | null
+}
+
+export type SessionCreateResult = {
+  session: SessionSummary
+  prompt: { messageId: string; acceptedAt: Iso } | null
+  promptError: string | null
+}
+
 export type SessionView = 'active' | 'all'
 
 export type AuditFilters = { from?: string; to?: string; limit?: number }
@@ -312,6 +326,36 @@ export type FilePreviewView = {
   text: string | null
   base64: string | null
   truncated: boolean
+}
+
+export type FsDrive = {
+  path: string
+  name: string
+  label: string | null
+  ready: boolean
+  totalBytes: number | null
+  freeBytes: number | null
+}
+
+export type FsEntry = {
+  name: string
+  fullPath: string
+  isDir: boolean
+  denied: boolean
+  isReparsePoint: boolean
+}
+
+export type FsQuickPath = {
+  key: string
+  path: string
+}
+
+export type FsBrowseView = {
+  path: string | null
+  parentPath: string | null
+  drives: FsDrive[]
+  entries: FsEntry[]
+  quickPaths?: FsQuickPath[]
 }
 
 export type TransferDirection = 'up' | 'down'
@@ -471,4 +515,34 @@ export type VpnPolicyUpdateInput = {
   maxAttemptsPerSession: number
   retryWaitThresholdSeconds: number
   countries: string[]
+}
+
+export type VpnRecoveryView = {
+  enabled: boolean
+  autoConnectVpn: boolean
+  autoResume: boolean
+  handleQuotaExceeded: boolean
+  handleRateLimited: boolean
+  handleAuthFailed: boolean
+  handleModelUnavailable: boolean
+  handleNetwork: boolean
+  handleStalled: boolean
+  handleUnknown: boolean
+  continuationPrompt: string
+  country: string | null
+  city: string | null
+  servers: string[]
+  cooldownSeconds: number
+  maxAttemptsPerSession: number
+  stallThresholdSeconds: number
+  discordEnabled: boolean
+  discordNotifyOnFailureOnly: boolean
+  discordWebhookConfigured: boolean
+  updatedAt: Iso
+}
+
+export type VpnRecoveryUpdateInput = Partial<
+  Omit<VpnRecoveryView, 'updatedAt' | 'discordWebhookConfigured'>
+> & {
+  discordWebhookUrl?: string | null
 }

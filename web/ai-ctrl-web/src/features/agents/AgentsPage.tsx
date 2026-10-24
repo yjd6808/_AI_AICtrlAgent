@@ -1,19 +1,28 @@
 import { useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import { ChevronRight, FolderTree, RefreshCw, Server } from 'lucide-react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import { ChevronDown, ChevronRight, FolderTree, Plus, RefreshCw, Server } from 'lucide-react'
 import {
+  useCreateSession,
   useInstances,
   useMachine,
+  useModels,
   useRefreshInstances,
   useSessions,
+  useWorkspaces,
 } from '../../api/queries'
+import { fetchMachineFs } from '../../api/client'
 import { describeApiError } from '../../api/errors'
 import { modeLabels, providerLabels } from '../../api/labels'
-import type { InstanceInfo, SessionSummary } from '../../api/types'
+import type {
+  InstanceInfo,
+  SessionCreateResult,
+  SessionSummary,
+} from '../../api/types'
 import { formatElapsed, formatRelative } from '../../api/format'
 import { buildSessionRows, sortSessions } from './sessionOrder'
 import { Badge } from '../../components/Badge'
 import { Button } from '../../components/Button'
+import { DirectoryPickerDialog } from '../../components/DirectoryPickerDialog'
 import { FreshnessBadge } from '../../components/FreshnessBadge'
 import { InlineNotice } from '../../components/InlineNotice'
 import { PageHeader } from '../../components/PageHeader'
@@ -21,6 +30,8 @@ import { StatusPill } from '../../components/StatusPill'
 import { EmptyBlock, ErrorBlock, LoadingBlock } from '../../components/AsyncState'
 import { useToast } from '../../components/Toast'
 import { instanceLabel } from '../../app/featureRoutes'
+import { keyToModel, modelToKey } from '../session/modelValue'
+import { VpnFailoverQuickPanel } from '../vpn/VpnFailoverQuickPanel'
 import { cx } from '../../lib/cx'
 import styles from './AgentsPage.module.css'
 
@@ -146,9 +157,9 @@ function AgentsOverview({
         </div>
       )}
 
-      <InlineNotice tone="info" title="세션 생성은 아직 웹에서 지원하지 않습니다">
-        M4 API에는 <code>session.create</code>가 없습니다. 새 세션은 Desktop에서 시작한 뒤 이
-        화면에서 이어서 제어하세요.
+      <InlineNotice tone="info" title="새 세션 만들기">
+        인스턴스를 선택하고 <strong>새 세션</strong>을 누르면 워크스페이스에서 세션을 만들고 첫
+        프롬프트를 보낼 수 있습니다. SharedStore 인스턴스는 읽기 전용입니다.
       </InlineNotice>
     </div>
   )
@@ -227,9 +238,11 @@ function InstanceAgents({
   const sessions = useSessions(machineId, instance.id.value, 'active')
   const refresh = useRefreshInstances(machineId)
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
+  const [creating, setCreating] = useState(false)
 
   const rows = buildSessionRows(sessions.data?.data.sessions ?? [], expanded)
   const managed = instance.managed
+  const canCreate = managed && instance.healthy && machine.data?.data.online !== false
 
   const onRefresh = () => {
     refresh.mutate(undefined, {
@@ -280,6 +293,15 @@ function InstanceAgents({
               에이전트 목록
             </Link>
             <Button
+              tone="primary"
+              size="sm"
+              icon={<Plus size={15} aria-hidden="true" />}
+              disabled={!canCreate}
+              onClick={() => setCreating((value) => !value)}
+            >
+              새 세션
+            </Button>
+            <Button
               tone="secondary"
               size="sm"
               icon={<RefreshCw size={15} aria-hidden="true" />}
@@ -303,6 +325,14 @@ function InstanceAgents({
         <InlineNotice tone="warn" title="머신 오프라인">
           캐시된 세션 목록입니다. 실시간 명령은 머신이 다시 연결될 때까지 실패할 수 있습니다.
         </InlineNotice>
+      ) : null}
+
+      {creating ? (
+        <CreateSessionPanel
+          machineId={machineId}
+          instanceId={instance.id.value}
+          onClose={() => setCreating(false)}
+        />
       ) : null}
 
       <section className={styles.sessionsPanel} aria-labelledby="active-sessions-title">
@@ -342,6 +372,239 @@ function InstanceAgents({
       </section>
     </div>
   )
+}
+
+function CreateSessionPanel({
+  machineId,
+  instanceId,
+  onClose,
+}: {
+  machineId: string
+  instanceId: string
+  onClose: () => void
+}) {
+  const toast = useToast()
+  const navigate = useNavigate()
+  const workspaces = useWorkspaces(machineId)
+  const models = useModels(machineId, instanceId)
+  const create = useCreateSession(machineId, instanceId)
+  const [directory, setDirectory] = useState<string | null>(null)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [checkingPath, setCheckingPath] = useState(false)
+  const [title, setTitle] = useState('')
+  const [initialPrompt, setInitialPrompt] = useState('')
+  const [modelKey, setModelKey] = useState('')
+
+  const workspaceList = workspaces.data?.data ?? []
+  const defaultDirectory = workspaceList[0]?.root ?? ''
+  const directoryValue = directory ?? defaultDirectory
+  const modelList = models.data?.data ?? []
+
+  const submit = async () => {
+    const target = directoryValue.trim()
+    if (!target) {
+      toast.notify('error', '워킹 디렉토리를 입력하거나 경로 선택 버튼으로 선택하세요.')
+      return
+    }
+
+    if (create.isPending || checkingPath) {
+      return
+    }
+
+    setCheckingPath(true)
+    try {
+      await fetchMachineFs(machineId, target)
+    } catch (caught) {
+      toast.notify('error', `경로를 확인할 수 없습니다: ${describeApiError(caught).message}`)
+      return
+    } finally {
+      setCheckingPath(false)
+    }
+
+    create.mutate(
+      {
+        directory: target,
+        title: title.trim() || null,
+        initialPrompt: initialPrompt.trim() || null,
+        model: keyToModel(modelKey),
+      },
+      {
+        onSuccess: (result) => {
+          if (result.data.kind === 'pending') {
+            toast.notify('info', '세션 생성 명령을 접수했습니다. 목록을 새로고침하세요.')
+            onClose()
+            return
+          }
+
+          const command = result.data.command
+          if (command.status !== 'Succeeded') {
+            toast.notify(
+              'error',
+              command.errorMessage ?? '세션을 만들지 못했습니다.',
+            )
+            return
+          }
+
+          const created = asSessionCreateResult(command.result)
+          if (!created) {
+            toast.notify('error', '세션 생성 결과를 해석하지 못했습니다.')
+            onClose()
+            return
+          }
+
+          if (created.promptError) {
+            toast.notify(
+              'error',
+              `세션은 만들었지만 첫 프롬프트는 실패했습니다: ${created.promptError}`,
+            )
+          } else {
+            toast.notify('success', '세션을 만들었습니다.')
+          }
+
+          onClose()
+          navigate(
+            `/m/${encodeURIComponent(machineId)}/agents/${encodeURIComponent(instanceId)}/sessions/${encodeURIComponent(created.session.ref.sessionId)}`,
+          )
+        },
+        onError: (error) => {
+          toast.notify('error', describeApiError(error).message)
+        },
+      },
+    )
+  }
+
+  return (
+    <section className={styles.createPanel} aria-label="새 세션 만들기">
+      <div className={styles.createHeader}>
+        <h2 className={styles.createTitle}>새 세션</h2>
+        <button type="button" className={styles.createClose} onClick={onClose}>
+          닫기
+        </button>
+      </div>
+
+      <form
+        className={styles.createForm}
+        onSubmit={(event) => {
+          event.preventDefault()
+          void submit()
+        }}
+      >
+        <div className={styles.createFields}>
+          <div className={styles.createFieldWide}>
+            <span>워킹 디렉토리</span>
+            <div className={styles.pathRow}>
+              <input
+                value={directoryValue}
+                onChange={(event) => setDirectory(event.target.value)}
+                placeholder="C:\Users\... (해당 머신의 절대 경로)"
+                spellCheck={false}
+                disabled={create.isPending}
+                aria-label="워킹 디렉토리"
+              />
+              <Button
+                size="sm"
+                tone="secondary"
+                icon={<FolderTree size={14} aria-hidden="true" />}
+                onClick={() => setPickerOpen(true)}
+                disabled={create.isPending}
+              >
+                경로 선택
+              </Button>
+            </div>
+            <span className={styles.createHint}>
+              직접 입력하거나 경로 선택에서 드라이브부터 트리로 찾을 수 있습니다.
+            </span>
+          </div>
+
+          <label className={styles.createField}>
+            <span>모델</span>
+            <div className={styles.selectWrap}>
+              <select
+                value={modelKey}
+                onChange={(event) => setModelKey(event.target.value)}
+                disabled={models.isLoading}
+              >
+                <option value="">세션 기본 모델</option>
+                {modelList.map((model) => (
+                  <option key={modelToKey(model)} value={modelToKey(model)}>
+                    {model.name ?? model.modelId}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown size={14} className={styles.selectIcon} aria-hidden="true" />
+            </div>
+          </label>
+
+          <label className={styles.createFieldWide}>
+            <span>제목 (선택)</span>
+            <input
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="예: 로그인 버그 수정"
+              maxLength={200}
+            />
+          </label>
+
+          <label className={styles.createFieldWide}>
+            <span>첫 프롬프트 (선택)</span>
+            <textarea
+              value={initialPrompt}
+              onChange={(event) => setInitialPrompt(event.target.value)}
+              placeholder="세션을 만든 뒤 바로 보낼 프롬프트를 입력하세요."
+              rows={3}
+            />
+          </label>
+
+          <div className={styles.createSection}>
+            <VpnFailoverQuickPanel machineId={machineId} />
+          </div>
+        </div>
+
+        {workspaces.isError ? (
+          <p className={styles.createError}>
+            기본 워크스페이스 경로를 불러오지 못했습니다. 경로를 직접 입력하세요.
+          </p>
+        ) : null}
+
+        <div className={styles.createActions}>
+          <p className={styles.createHint}>
+            세션은 입력한 디렉토리에서 생성됩니다. 존재하지 않는 경로는 만들 수
+            없습니다.
+          </p>
+          <Button
+            type="submit"
+            tone="primary"
+            icon={<Plus size={15} aria-hidden="true" />}
+            loading={create.isPending || checkingPath}
+          >
+            세션 만들기
+          </Button>
+        </div>
+      </form>
+
+      {pickerOpen ? (
+        <DirectoryPickerDialog
+          machineId={machineId}
+          initialPath={directoryValue}
+          onSelect={setDirectory}
+          onClose={() => setPickerOpen(false)}
+        />
+      ) : null}
+    </section>
+  )
+}
+
+function asSessionCreateResult(value: unknown): SessionCreateResult | null {
+  if (typeof value !== 'object' || value === null) {
+    return null
+  }
+
+  const candidate = value as Partial<SessionCreateResult>
+  if (!candidate.session || typeof candidate.session.ref?.sessionId !== 'string') {
+    return null
+  }
+
+  return candidate as SessionCreateResult
 }
 
 function SessionRow({

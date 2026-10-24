@@ -45,6 +45,28 @@ internal sealed class FakeProviderInstance : IProviderInstance
             kind,
             properties is null ? null : JsonSerializer.SerializeToElement(properties)));
 
+    public ValueTask<SessionSummary> CreateSessionAsync(SessionCreateRequest req, CancellationToken ct)
+    {
+        var summary = new SessionSummary(
+            new SessionRef(new MachineId("m_test"), Info.Id, "ses_created"),
+            req.Title ?? "ses_created",
+            null,
+            req.Directory,
+            AcRunState.Idle,
+            ErrorClass.None,
+            null,
+            DateTimeOffset.UnixEpoch,
+            req.Model,
+            null,
+            SessionDisplayState.Idle,
+            null,
+            null,
+            0,
+            true);
+        Sessions.Add(summary);
+        return ValueTask.FromResult(summary);
+    }
+
     public ValueTask<IReadOnlyList<SessionSummary>> ListSessionsAsync(SessionQuery q, CancellationToken ct) =>
         ValueTask.FromResult<IReadOnlyList<SessionSummary>>(Sessions.ToList());
 

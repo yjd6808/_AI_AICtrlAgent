@@ -28,10 +28,11 @@ public sealed record SessionAbortAndPromptPayload(SessionRef Session, string Tex
 
 public sealed record SessionCreatePayload(
     InstanceId Instance,
-    string WorkspaceId,
+    string? WorkspaceId,
     string? Title,
     string InitialPrompt,
-    ModelRef? Model);
+    ModelRef? Model,
+    string? Directory = null);
 
 public sealed record SessionPermissionReplyPayload(SessionRef Session, string PermissionId, string Response);
 

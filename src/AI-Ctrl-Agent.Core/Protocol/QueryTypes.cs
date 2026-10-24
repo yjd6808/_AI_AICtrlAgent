@@ -32,6 +32,8 @@ public static class QueryTypes
 
     public const string FilesPreview = "files.preview";
 
+    public const string FsBrowse = "fs.browse";
+
     public const string LogsList = "logs.list";
 
     public const string LogsTail = "logs.tail";
@@ -45,6 +47,8 @@ public static class QueryTypes
     public const string VpnServers = "vpn.servers";
 
     public const string VpnPolicy = "vpn.policy";
+
+    public const string VpnRecovery = "vpn.recovery";
 }
 
 public sealed record AgentInstancesQuery(string? Kind);

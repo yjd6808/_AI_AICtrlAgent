@@ -13,6 +13,7 @@ import type {
   FilePreviewView,
   FileSort,
   FileStatView,
+  FsBrowseView,
   InstanceInfo,
   LogFileView,
   LogTextView,
@@ -22,6 +23,7 @@ import type {
   ModelOption,
   Problem,
   ProviderKind,
+  SessionCreateInput,
   SessionPage,
   SessionSummary,
   SessionView,
@@ -34,6 +36,8 @@ import type {
   VpnPageSnapshot,
   VpnPolicyUpdateInput,
   VpnPolicyView,
+  VpnRecoveryUpdateInput,
+  VpnRecoveryView,
   WorkspaceInfo,
 } from './types'
 
@@ -257,6 +261,7 @@ export const apiPaths = {
   enrollmentCodes: '/machines/enrollment-codes',
   revokeMachine: (machineId: string) => machinePath(machineId),
   workspaces: (machineId: string) => `${machinePath(machineId)}/workspaces`,
+  machineFs: (machineId: string) => `${machinePath(machineId)}/fs`,
   files: (machineId: string, workspaceId: string) =>
     `${machinePath(machineId)}/workspaces/${encodeURIComponent(workspaceId)}/files`,
   fileStat: (machineId: string, workspaceId: string) =>
@@ -287,6 +292,7 @@ export const apiPaths = {
   vpnConnect: (machineId: string) => `${machinePath(machineId)}/vpn/connect`,
   vpnDisconnect: (machineId: string) => `${machinePath(machineId)}/vpn/disconnect`,
   vpnPolicy: (machineId: string) => `${machinePath(machineId)}/vpn/policy`,
+  vpnRecovery: (machineId: string) => `${machinePath(machineId)}/vpn/recovery`,
 }
 
 export function loginUrl(returnUrl: string): string {
@@ -445,6 +451,27 @@ export async function issuePrompt(
   return result
 }
 
+export async function issueCreateSession(
+  machineId: string,
+  instanceId: string,
+  input: SessionCreateInput,
+  requestId: string,
+) {
+  const result = await api.postCommand(apiPaths.sessions(machineId), {
+    query: { instance: instanceId, wait: 20 },
+    body: {
+      workspaceId: input.workspaceId || undefined,
+      directory: input.directory || undefined,
+      title: input.title || undefined,
+      initialPrompt: input.initialPrompt || undefined,
+      model: input.model ?? undefined,
+    },
+    requestId,
+    idempotencyKey: requestId,
+  })
+  return result
+}
+
 export async function issueAbortAndPrompt(
   machineId: string,
   instanceId: string,
@@ -497,6 +524,18 @@ export async function replyPermission(
 
 export async function fetchWorkspaces(machineId: string, signal?: AbortSignal) {
   const result = await api.getEnvelope<WorkspaceInfo[]>(apiPaths.workspaces(machineId), {
+    signal,
+  })
+  return { data: result.data.data, meta: result.data.meta }
+}
+
+export async function fetchMachineFs(
+  machineId: string,
+  path: string | null | undefined,
+  signal?: AbortSignal,
+) {
+  const result = await api.getEnvelope<FsBrowseView>(apiPaths.machineFs(machineId), {
+    query: { path: path || undefined },
     signal,
   })
   return { data: result.data.data, meta: result.data.meta }
@@ -709,6 +748,27 @@ export async function updateVpnPolicy(
   requestId: string,
 ) {
   return api.postCommand(apiPaths.vpnPolicy(machineId), {
+    method: 'PUT',
+    query: { wait: 5 },
+    body: input,
+    requestId,
+    idempotencyKey: requestId,
+  })
+}
+
+export async function fetchVpnRecovery(machineId: string, signal?: AbortSignal) {
+  const result = await api.getEnvelope<VpnRecoveryView>(apiPaths.vpnRecovery(machineId), {
+    signal,
+  })
+  return { data: result.data.data, meta: result.data.meta }
+}
+
+export async function updateVpnRecovery(
+  machineId: string,
+  input: VpnRecoveryUpdateInput,
+  requestId: string,
+) {
+  return api.postCommand(apiPaths.vpnRecovery(machineId), {
     method: 'PUT',
     query: { wait: 5 },
     body: input,

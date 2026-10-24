@@ -49,9 +49,15 @@ public sealed class AcDefaultConfigsTests
     [Fact]
     public void OverridesPathFor_derives_overrides_file_next_to_config()
     {
-        var path = Path.Combine(@"C:\AiCtrl\Server\config", "server.yaml");
+        var path = Path.Combine(@"C:\AiCtrl\AgentServer\config", "server.yaml");
 
-        AcDefaultConfigs.OverridesPathFor(path).ShouldBe(@"C:\AiCtrl\Server\config\server.overrides.yaml");
+        AcDefaultConfigs.OverridesPathFor(path).ShouldBe(@"C:\AiCtrl\AgentServer\config\server.overrides.yaml");
+    }
+
+    [Fact]
+    public void Default_server_config_path_uses_AgentServer_home()
+    {
+        AcDefaultConfigs.DefaultServerConfigPath.ShouldBe(@"C:\AiCtrl\AgentServer\config\server.yaml");
     }
 
     [Fact]

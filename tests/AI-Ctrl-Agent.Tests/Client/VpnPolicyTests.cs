@@ -1,4 +1,5 @@
-﻿using AiCtrl.Client.Vpn;
+﻿using AiCtrl.Client.Providers.OpenCode.Backend;
+using AiCtrl.Client.Vpn;
 using AiCtrl.Core.Domain;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
@@ -68,6 +69,114 @@ public sealed class VpnPolicyTests
         reloaded.Servers["JP#10"].Status.ShouldBe(VpnServerStatuses.QuotaExhausted);
         reloaded.Servers["JP#10"].FailureCount.ShouldBe(1);
         Directory.GetFiles(directory, "*.tmp-*").ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Recovery_settings_persist_and_webhook_secret_is_not_written_to_disk()
+    {
+        var directory = TempDirectory();
+        var path = Path.Combine(directory, "vpn-policy.json");
+        var time = new FakeTimeProvider();
+        var secrets = new InMemorySecretStore();
+        var store = new VpnPolicyStore(
+            time,
+            NullLogger<VpnPolicyStore>.Instance,
+            path,
+            recoveryDefaults: new VpnRecoverySettings { Enabled = false },
+            secrets: secrets);
+
+        var view = await store.SaveRecoveryAsync(
+            new VpnRecoveryUpdatePayload(
+                Enabled: true,
+                ContinuationPrompt: "resume from checkpoint",
+                HandleQuotaExceeded: false,
+                CooldownSeconds: 90,
+                MaxAttemptsPerSession: 5,
+                StallThresholdSeconds: 120,
+                Country: " jp ",
+                City: "Tokyo",
+                DiscordEnabled: true,
+                DiscordWebhookUrl: "https://discord.com/api/webhooks/42/token"),
+            TestContext.Current.CancellationToken);
+
+        view.Enabled.ShouldBeTrue();
+        view.HandleQuotaExceeded.ShouldBeFalse();
+        view.CooldownSeconds.ShouldBe(90);
+        view.MaxAttemptsPerSession.ShouldBe(5);
+        view.StallThresholdSeconds.ShouldBe(120);
+        view.Country.ShouldBe("JP");
+        view.City.ShouldBe("Tokyo");
+        view.DiscordWebhookConfigured.ShouldBeTrue();
+
+        var file = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
+        file.ShouldNotContain("discord.com");
+        file.ShouldNotContain("token");
+
+        var reloaded = new VpnPolicyStore(
+            time,
+            NullLogger<VpnPolicyStore>.Instance,
+            path,
+            recoveryDefaults: new VpnRecoverySettings { Enabled = false },
+            secrets: secrets);
+        var recovery = await reloaded.GetRecoveryAsync(TestContext.Current.CancellationToken);
+        recovery.Enabled.ShouldBeTrue();
+        recovery.ContinuationPrompt.ShouldBe("resume from checkpoint");
+        recovery.CooldownSeconds.ShouldBe(90);
+
+        var cleared = await reloaded.SaveRecoveryAsync(
+            new VpnRecoveryUpdatePayload(
+                Country: string.Empty,
+                City: string.Empty,
+                DiscordWebhookUrl: string.Empty),
+            TestContext.Current.CancellationToken);
+        cleared.DiscordWebhookConfigured.ShouldBeFalse();
+        cleared.Country.ShouldBeNull();
+        cleared.City.ShouldBeNull();
+        (await reloaded.GetDiscordWebhookAsync(TestContext.Current.CancellationToken)).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Recovery_rejects_a_non_discord_webhook()
+    {
+        var directory = TempDirectory();
+        var store = new VpnPolicyStore(
+            new FakeTimeProvider(),
+            NullLogger<VpnPolicyStore>.Instance,
+            Path.Combine(directory, "vpn-policy.json"),
+            secrets: new InMemorySecretStore());
+
+        var error = await Should.ThrowAsync<VpnException>(() => store.SaveRecoveryAsync(
+            new VpnRecoveryUpdatePayload(DiscordWebhookUrl: "https://example.com/api/webhooks/1/token"),
+            TestContext.Current.CancellationToken));
+
+        error.Code.ShouldBe("vpn_recovery_invalid_webhook");
+    }
+
+    [Fact]
+    public void Recovery_settings_clamp_and_normalize_input()
+    {
+        var settings = new VpnRecoverySettings
+        {
+            ContinuationPrompt = "   ",
+            Country = " jp ",
+            City = "   ",
+            Servers = ["JP#1", " jp#1 ", ""],
+            CooldownSeconds = -5,
+            MaxAttemptsPerSession = 99,
+            StallThresholdSeconds = 999_999,
+        }.Normalize();
+
+        settings.ContinuationPrompt.ShouldBe(VpnRecoverySettings.DefaultContinuationPrompt);
+        settings.Country.ShouldBe("JP");
+        settings.City.ShouldBeNull();
+        settings.Servers.ShouldBe(["JP#1"]);
+        settings.CooldownSeconds.ShouldBe(0);
+        settings.MaxAttemptsPerSession.ShouldBe(10);
+        settings.StallThresholdSeconds.ShouldBe(86_400);
+        settings.ShouldHandle(ErrorClass.QuotaExceeded).ShouldBeTrue();
+        settings.ShouldHandle(ErrorClass.Aborted).ShouldBeFalse();
+        settings.ShouldHandle(ErrorClass.ToolError).ShouldBeFalse();
+        settings.ShouldHandle(ErrorClass.Unknown, stalled: true).ShouldBeTrue();
     }
 
     [Fact]
@@ -198,5 +307,23 @@ public sealed class VpnPolicyTests
         var path = Path.Combine(Path.GetTempPath(), "ai-ctrl-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(path);
         return path;
+    }
+
+    private sealed class InMemorySecretStore : ISecretStore
+    {
+        private readonly Dictionary<string, string> _values = new(StringComparer.Ordinal);
+
+        public ValueTask<string?> LoadAsync(string key, CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(_values.GetValueOrDefault(key));
+        }
+
+        public ValueTask SaveAsync(string key, string value, CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            _values[key] = value;
+            return ValueTask.CompletedTask;
+        }
     }
 }

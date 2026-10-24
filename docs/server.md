@@ -8,8 +8,8 @@ Server는 `Microsoft.NET.Sdk.Web` 기반 ASP.NET Core 9 프로젝트입니다(`s
 
 `ServerSetup.BuildAcServer`가 다음 순서로 설정을 구성합니다(`ServerSetup.cs:107-129`).
 
-1. `C:\AiCtrl\Server\config\server.yaml` (없으면 기본값 생성)
-2. `C:\AiCtrl\Server\config\server.overrides.yaml` (선택)
+1. `C:\AiCtrl\AgentServer\config\server.yaml` (없으면 기본값 생성)
+2. `C:\AiCtrl\AgentServer\config\server.overrides.yaml` (선택)
 3. `AICTRL__` 환경변수
 
 YAML은 `AcYamlConfigurationProvider`가 flat key로 변환합니다. 시퀀스는 `key:0:sub` 형태가 됩니다. 탭과 다중 문서는 거부합니다. 설정 파일은 핫 리로드되지 않습니다.
@@ -42,9 +42,9 @@ YAML은 `AcYamlConfigurationProvider`가 flat key로 변환합니다. 시퀀스�
 
 ### 정적 웹
 
-`WebApp.ResolveDistPath`가 `web:distPath`를 우선 사용합니다(`WebApp.cs:14-29`). 설정 경로가 잘못되면 fallback하지 않고 UI를 제공하지 않습니다. dist가 없으면 `GET /`는 `AI-Ctrl-Agent Server` 문자열을 반환합니다.
+`WebApp.ResolveDistPath`가 `web:distPath`를 우선 사용합니다(`WebApp.cs:14-29`). 설정 경로가 잘못되면 fallback하지 않고 UI를 제공하지 않습니다. dist가 있으면 `GET /`는 `index.html`을 반환하고, SPA의 `HomeRedirect`가 마지막 머신 또는 온라인 머신의 `/m/{machineId}`로 이동합니다. dist가 없을 때만 `GET /`가 `AI-Ctrl-Agent Server` 문자열을 반환합니다.
 
-SPA fallback은 `/api`와 `/hubs`를 제외한 모든 경로에 `index.html`을 반환합니다(`WebApp.cs:43-55`).
+SPA fallback은 `/api`와 `/hubs`를 제외한 모든 경로에 `index.html`을 반환합니다(`WebApp.cs:47-59`).
 
 ## 2. HTTP 엔드포인트
 
@@ -84,6 +84,7 @@ SPA fallback은 `/api`와 `/hubs`를 제외한 모든 경로에 `index.html`을 
 
 | 메서드 | 경로 | 명령 |
 | --- | --- | --- |
+| POST | `/api/v1/machines/{machineId}/sessions` | `session.create` (`instance` 필수, body: `directory` 또는 `workspaceId`, `title?`, `initialPrompt?`, `model?`) |
 | POST | `/api/v1/machines/{machineId}/sessions/{sessionId}/abort` | `session.abort` |
 | POST | `/api/v1/machines/{machineId}/sessions/{sessionId}/prompt` | `session.prompt` |
 | POST | `/api/v1/machines/{machineId}/sessions/{sessionId}/abort-and-prompt` | `session.abort_and_prompt` |
@@ -102,6 +103,8 @@ SPA fallback은 `/api`와 `/hubs`를 제외한 모든 경로에 `index.html`을 
 | GET | `/api/v1/machines/{machineId}/vpn/servers` | 서버 목록 |
 | GET | `/api/v1/machines/{machineId}/vpn/policy` | failover 정책 조회 |
 | PUT | `/api/v1/machines/{machineId}/vpn/policy` | `vpn.policy.set` 명령 |
+| GET | `/api/v1/machines/{machineId}/vpn/recovery` | 복구·Discord 설정 조회 |
+| PUT | `/api/v1/machines/{machineId}/vpn/recovery` | `vpn.recovery.set` 명령 |
 | POST | `/api/v1/machines/{machineId}/vpn/connect` | `vpn.connect` 명령 |
 | POST | `/api/v1/machines/{machineId}/vpn/disconnect` | `vpn.disconnect` 명령 |
 
@@ -111,6 +114,7 @@ SPA fallback은 `/api`와 `/hubs`를 제외한 모든 경로에 `index.html`을 
 | --- | --- | --- |
 | GET | `/api/v1/machines/{machineId}/workspaces` | 워크스페이스 목록 |
 | POST | `/api/v1/machines/{machineId}/workspaces` | 워크스페이스 등록. step-up 필요 |
+| GET | `/api/v1/machines/{machineId}/fs` | 드라이브·하위 디렉터리 탐색. `path` 생략 시 드라이브 목록 |
 | GET | `.../workspaces/{workspaceId}/files` | 파일 목록 |
 | GET | `.../workspaces/{workspaceId}/files/stat` | 파일 메타데이터, `hash` 지원 |
 | GET | `.../workspaces/{workspaceId}/files/preview` | 텍스트·이미지 미리보기 |
@@ -119,6 +123,8 @@ SPA fallback은 `/api`와 `/hubs`를 제외한 모든 경로에 `index.html`을 
 | POST | `.../workspaces/{workspaceId}/files/rename` | `files.rename` |
 
 레거시 별칭도 함께 매핑되어 있습니다. `.../workspaces/{workspaceId}/stat`, `/preview`, `/mkdir`, `/delete`, `/rename`이 그에 해당합니다(`WorkspaceEndpoints.cs:47-60`).
+
+`/fs`는 워크스페이스에 등록되지 않은 절대 경로도 탐색합니다. `path`가 없으면 드라이브 목록과 자주 쓰는 위치(`quickPaths`: 데스크톱, 문서, 다운로드, 사용자 폴더, AppData)를 반환하고, 있으면 `path`의 하위 디렉터리와 `parentPath`를 반환합니다. 상대 경로나 존재하지 않는 경로는 400 `path_invalid`, hard deny 경로는 403 `path_denied`입니다. 응답의 각 항목에는 `denied`(진입 차단)와 `isReparsePoint`가 포함됩니다.
 
 워크스페이스 등록은 `auth_time`이 `auth.stepUpMinutes`(기본 30분) 이내여야 합니다. 범위를 넘으면 401 `reauth_required`입니다. 다른 파일 변경과 명령에는 별도 step-up이 없습니다.
 
@@ -233,7 +239,7 @@ SPA fallback은 `/api`와 `/hubs`를 제외한 모든 경로에 `index.html`을 
 
 ### 시크릿 저장소
 
-- 경로: `C:\AiCtrl\Server\config\secrets.bin`
+- 경로: `C:\AiCtrl\AgentServer\config\secrets.bin`
 - Windows DPAPI `LocalMachine`, entropy `AiCtrl.Server.Secrets.v1`
 - `key<TAB>base64(value)` 라인을 암호화해 저장합니다.
 - 저장 시 임시 파일 후 원자적으로 교체합니다.
@@ -270,6 +276,7 @@ SPA fallback은 `/api`와 `/hubs`를 제외한 모든 경로에 `index.html`을 
 | --- | --- |
 | `session.abort` | 15초 |
 | `session.prompt` | 15초 |
+| `session.create` | 20초 (엔드포인트 기본값) |
 | `session.abort_and_prompt` | 30초 |
 | `vpn.connect` | 120초 |
 | `vpn.disconnect` | 30초 |
@@ -306,7 +313,7 @@ Watch lease가 만료되면 에이전트에 watch 해제가 전달됩니다. `Se
 `TransferStore`가 전송 상태를 관리합니다(`Transfers/TransferStore.cs`).
 
 - ID 접두사: `tr_`
-- 기본 디렉터리: `C:\AiCtrl\Server\data\transfers`
+- 기본 디렉터리: `C:\AiCtrl\AgentServer\data\transfers`
 - 파일 최대 2GiB, 전체 20GiB, chunk 8MiB, TTL 24시간
 - chunk 쓰기는 transfer별 SemaphoreSlim으로 직렬화합니다.
 - 예상 chunk 크기와 다르면 400입니다.

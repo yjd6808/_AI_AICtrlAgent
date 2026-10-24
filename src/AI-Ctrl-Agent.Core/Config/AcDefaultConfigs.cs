@@ -4,12 +4,25 @@ namespace AiCtrl.Core.Config;
 
 public static class AcDefaultConfigs
 {
-    public static string DefaultServerConfigPath { get; } = @"C:\AiCtrl\Server\config\server.yaml";
+    public const string RootPath = @"C:\AiCtrl";
 
-    public static string DefaultClientConfigPath { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "AiCtrl",
-        "client.yaml");
+    public const string AgentHomeVariable = "AICTRL_AGENT_HOME";
+
+    public static string AgentHome { get; } = ResolveAgentHome();
+
+    public static string ServerHome { get; } = Path.Combine(RootPath, "AgentServer");
+
+    public static string DefaultServerConfigPath { get; } = Path.Combine(ServerHome, "config", "server.yaml");
+
+    public static string DefaultClientConfigPath => Path.Combine(AgentHome, "config", "client.yaml");
+
+    private static string ResolveAgentHome()
+    {
+        var custom = Environment.GetEnvironmentVariable(AgentHomeVariable);
+        return string.IsNullOrWhiteSpace(custom)
+            ? Path.Combine(RootPath, "Agent")
+            : Path.GetFullPath(custom);
+    }
 
     public static bool EnsureFile(string filePath, string defaultContent)
     {
@@ -63,7 +76,7 @@ public static class AcDefaultConfigs
           stepUpMinutes: 30
 
         geo:
-          dbPath: 'C:\AiCtrl\Server\data\GeoLite2-Country.mmdb'
+          dbPath: 'C:\AiCtrl\AgentServer\data\GeoLite2-Country.mmdb'
           allowCountries: [KR]
           allowCidrs: []
           failClosed: true
@@ -105,7 +118,7 @@ public static class AcDefaultConfigs
           longPollMaxMs: 25000
 
         transfers:
-          dir: 'C:\AiCtrl\Server\data\transfers'
+          dir: 'C:\AiCtrl\AgentServer\data\transfers'
           maxFileBytes: 2147483648
           maxTotalBytes: 21474836480
           chunkBytes: 8388608
@@ -116,16 +129,17 @@ public static class AcDefaultConfigs
           throttleMinutes: 5
 
         logging:
+          directory: 'C:\AiCtrl\AgentServer\logs'
           fileLevel: Debug
           consoleLevel: Information
           retentionDays: 30
           maxTotalGB: 5
 
         database:
-          path: 'C:\AiCtrl\Server\data\aictrl.db'
+          path: 'C:\AiCtrl\AgentServer\data\aictrl.db'
 
         backup:
-          dir: 'C:\AiCtrl\Server\data\backup'
+          dir: 'C:\AiCtrl\AgentServer\data\backup'
           keep: 14
         """;
 
@@ -189,21 +203,30 @@ public static class AcDefaultConfigs
           recovery:
             enabled: false
             discordWebhookUrl: ''
+            discordEnabled: false
+            discordNotifyOnFailureOnly: false
             autoConnectVpn: true
             autoResume: true
+            handleQuotaExceeded: true
             handleRateLimited: true
+            handleAuthFailed: false
+            handleModelUnavailable: false
+            handleNetwork: true
             handleStalled: true
+            handleUnknown: false
             continuationPrompt: 'Continue from where you stopped. Do not repeat completed work.'
             country: ''
             city: ''
             servers: []
             cooldownSeconds: 600
             maxAttemptsPerSession: 3
+            stallThresholdSeconds: 0
 
         reconnect:
           maxBackoffSeconds: 30
 
         logging:
+          directory: 'C:\AiCtrl\Agent\logs'
           fileLevel: Debug
           consoleLevel: Information
           retentionDays: 30

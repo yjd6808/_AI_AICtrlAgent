@@ -4,7 +4,7 @@ namespace AiCtrl.Server.Transfers;
 
 public sealed record TransferOptions
 {
-    public string Dir { get; init; } = @"C:\AiCtrl\Server\data\transfers";
+    public string Dir { get; init; } = @"C:\AiCtrl\AgentServer\data\transfers";
 
     public long MaxFileBytes { get; init; } = 2L * 1024 * 1024 * 1024;
 
@@ -20,7 +20,7 @@ public sealed record TransferOptions
         var section = configuration.GetSection("transfers");
         return new TransferOptions
         {
-            Dir = ReadString(section, "dir", @"C:\AiCtrl\Server\data\transfers"),
+            Dir = ReadString(section, "dir", @"C:\AiCtrl\AgentServer\data\transfers"),
             MaxFileBytes = ReadLong(section, "maxFileBytes", 2L * 1024 * 1024 * 1024),
             MaxTotalBytes = ReadLong(section, "maxTotalBytes", 20L * 1024 * 1024 * 1024),
             ChunkBytes = (int)ReadLong(section, "chunkBytes", 8 * 1024 * 1024),

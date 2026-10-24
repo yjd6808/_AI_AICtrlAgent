@@ -35,6 +35,24 @@ public sealed class FakeOpenCodeState
         }
     }
 
+    public FakeSessionDto CreateSession(string? title, string? parentId, string? directory)
+    {
+        lock (_gate)
+        {
+            var entry = CreateEntry(
+                string.IsNullOrWhiteSpace(title) ? "Untitled" : title.Trim(),
+                parentId,
+                string.IsNullOrWhiteSpace(directory) ? @"C:\fake\ws" : directory);
+            _sessions[entry.Session.Id] = entry;
+            _sse.Publish("session.created", new Dictionary<string, object?>
+            {
+                ["sessionID"] = entry.Session.Id,
+                ["info"] = entry.Session,
+            });
+            return entry.Session;
+        }
+    }
+
     public string SeedUserMessage(string sessionId, string text, string? messageId = null)
     {
         lock (_gate)

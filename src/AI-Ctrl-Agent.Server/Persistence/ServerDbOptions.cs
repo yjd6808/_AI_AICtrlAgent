@@ -4,7 +4,7 @@ namespace AiCtrl.Server.Persistence;
 
 public sealed record ServerDbOptions
 {
-    public const string DefaultPath = @"C:\AiCtrl\Server\data\aictrl.db";
+    public const string DefaultPath = @"C:\AiCtrl\AgentServer\data\aictrl.db";
 
     public string Path { get; init; } = DefaultPath;
 

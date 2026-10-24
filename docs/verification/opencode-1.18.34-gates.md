@@ -283,7 +283,7 @@ OpenCode 할당량 소진·응답 시간 초과 시 현재 턴을 중단하고, 
 | `ErrorClassifierTests` | `free usage`, `subscribe to Go`, timeout 패턴 분류 |
 | `app.integration.test.tsx` | VPN 정책 로드·저장, 정책 저장 command 접수와 mock 상태 반영 |
 
-- 정책 파일은 `%LOCALAPPDATA%\AiCtrl\vpn-policy.json`이며 `temp` 파일 + `File.Move(overwrite: true)`로 원자적으로 교체한다. 파일이 없거나 손상되면 기본값 `enabled=true`, `minLoad=0`, `maxLoad=70`, `excludeUsedWithinHours=24`, `maxAttemptsPerSession=3`, `retryWaitThresholdSeconds=180`, `countries=[]`을 사용한다.
+- 정책 파일은 `C:\AiCtrl\Agent\data\vpn-policy.json`이며 `temp` 파일 + `File.Move(overwrite: true)`로 원자적으로 교체한다. 파일이 없거나 손상되면 기본값 `enabled=true`, `minLoad=0`, `maxLoad=70`, `excludeUsedWithinHours=24`, `maxAttemptsPerSession=3`, `retryWaitThresholdSeconds=180`, `countries=[]`을 사용한다.
 - 서버 상태는 `ok`, `quota_exhausted`, `opencode_timeout`, `connect_failed` 네 가지다. 후보는 허용 국가, 부하 범위, 최근 사용 제외 시간, 현재 서버 제외 조건을 만족해야 하며, 실패 상태는 `availableAt` 쿨다운이 지나기 전까지 제외한다. 쿨다운이 지나면 같은 서버를 다시 후보로 사용할 수 있다. 정렬은 부하 오름차순, 점수 내림차순, 동점 시 무작위다.
 - 재시도 대기열은 `RetryInfo.NextAt`을 우선 사용하고, 없으면 메시지의 `재시도 중 N초 후`·`retry in N seconds`를 파싱한다. 대기 시간이 `retryWaitThresholdSeconds`보다 짧으면 같은 서버에서 대기 후 재개하고, 길거나 알 수 없으면 해당 서버를 쿨다운 처리하고 다른 서버를 선택한다.
 - 복구 순서는 `AbortSessionAsync` → 정책 확인 → 필요 시 VPN 전환 → `PromptAsync`다. 전환 시 `force=true`로 연결하고 `status --json`의 터널 상태·서버 ID·출구 IP를 검증한다. 서버를 바꿨는데 출구 IP가 그대로면 연결 실패로 처리한다.

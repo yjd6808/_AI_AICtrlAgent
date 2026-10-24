@@ -227,6 +227,15 @@ public sealed class ClientRequestHandler
                     AcJsonContext.Default.FilePreviewView);
             }
 
+            case QueryTypes.FsBrowse:
+            {
+                var query = Deserialize(packet, AcJsonContext.Default.FsBrowseQuery)
+                    ?? new FsBrowseQuery(null);
+                return JsonSerializer.SerializeToElement(
+                    _files.Browse(query),
+                    AcJsonContext.Default.FsBrowseView);
+            }
+
             case QueryTypes.AgentInstances:
             {
                 var query = Deserialize(packet, AcJsonContext.Default.AgentInstancesQuery);
@@ -358,6 +367,11 @@ public sealed class ClientRequestHandler
                 return JsonSerializer.SerializeToElement(
                     await VpnOrThrow().GetPolicyAsync(ct).ConfigureAwait(false),
                     AcJsonContext.Default.VpnPolicyView);
+
+            case QueryTypes.VpnRecovery:
+                return JsonSerializer.SerializeToElement(
+                    await VpnOrThrow().GetRecoveryAsync(ct).ConfigureAwait(false),
+                    AcJsonContext.Default.VpnRecoveryView);
 
             case QueryTypes.MachineFeatures:
                 return JsonSerializer.SerializeToElement(BuildFeatures(), AcJsonContext.Default.ListMachineFeature);

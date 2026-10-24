@@ -166,6 +166,11 @@ Node.js 요구 사항은 README에 24 이상으로 적혀 있습니다. 이 PC�
 
 - 세션 목록은 `instance`와 `view`를 필수로 사용합니다. 기본은 `active`입니다.
 - `includeChildren=true`로 자식 세션을 포함합니다.
+- 관리 인스턴스에서는 `새 세션` 패널로 워킹 디렉토리, 제목, 첫 프롬프트, 모델을 지정해 세션을 만들 수 있습니다. 생성 직후 해당 세션 화면으로 이동합니다.
+- 모델 목록은 하드코딩하지 않고 `GET /api/v1/machines/{machineId}/models`로 조회합니다. 서버는 `session.models` query를 에이전트에 전달하고, 에이전트는 OpenCode의 `/config/providers`(v2는 `/model`) 응답을 `ModelOption`으로 변환합니다. 응답이 없으면 `세션 기본 모델` 항목만 표시합니다.
+- 워킹 디렉토리는 직접 입력하거나 `경로 선택` 대화상자로 고릅니다. 대화상자는 `빠른 위치`(바탕 화면, 문서, 다운로드, 사용자 폴더, AppData)와 드라이브를 트리 루트로 표시하고, 선택한 위치를 그 자리에서 펼칩니다. 차단된 경로는 `차단됨`으로 표시하고 펼칠 수 없습니다.
+- 세션 생성 전에 `fs` 조회로 경로 존재 여부를 확인하고, 실패하면 명령을 보내지 않고 토스트로 안내합니다.
+- `새 세션` 패널의 `오류 복구(failover)` 섹션은 머신 공통 `vpn.recovery` 중 사용 여부, 자동 VPN 전환, 자동 재개, 오류별 트리거, 재시작 프롬프트와 고급 설정(쿨다운·세션당 최대 시도·정체 임계값)을 편집합니다. 저장하면 이 머신의 모든 세션에 즉시 적용되며, 국가·도시·서버·Discord 같은 나머지 값은 VPN 페이지의 `VpnRecoveryPanel`에서 조정합니다.
 - 세션 상태에 따라 prompt, abort, abort-and-prompt 버튼이 달라집니다.
 - `Running`, `Retrying`, `Stalled`, `WaitingPermission`은 진행 중으로 표시합니다.
 - `ForeignBusy`와 `Unknown`은 쓰기 작업을 비활성화합니다.
@@ -192,6 +197,8 @@ Node.js 요구 사항은 README에 24 이상으로 적혀 있습니다. 이 PC�
 - `force` 옵션으로 실행 중 세션을 무시할 수 있습니다.
 - CLI 부재, helper 미응답, Proton 로그인 필요, GUI 실행 중, 세션 사용 중 상태를 구분해 버튼을 비활성화합니다.
 - 자동 failover 정책은 30초마다 조회하고, 저장 시 `wait=5` 명령을 보냅니다.
+- `VpnRecoveryPanel`은 복구 사용 여부, 오류별 트리거, 재시작 프롬프트, 국가·도시·허용 서버, 쿨다운, 세션당 최대 시도, 정체 임계값을 편집합니다. `vpn.recovery`를 30초마다 조회하고 저장 시 `wait=5` 명령을 보냅니다. 설정은 에이전트 재시작 없이 다음 오류 이벤트부터 적용됩니다.
+- 복구 패널은 같은 화면에서 `vpn.recovery.set` 결과를 기다리며, pending이면 접수 안내를 표시합니다.
 - 킬 스위치, 프로토콜, 포트 포워딩, 자동 재연결은 UI에서 제공하지 않습니다.
 
 ### Logs와 Commands
@@ -206,6 +213,9 @@ Node.js 요구 사항은 README에 24 이상으로 적혀 있습니다. 이 PC�
 - 등록 코드를 생성해 화면에 한 번 표시합니다. 코드는 메모리에만 보관합니다.
 - 머신 해제는 확인 후 `DELETE /api/v1/machines/{machineId}`를 호출합니다.
 - 계정 이메일과 인증 시각을 표시합니다.
+- `VpnRecoveryNotificationPanel`에서 머신을 선택하고 Discord 알림 사용, 실패 전용 알림, webhook URL을 설정합니다. VPN 페이지의 복구 패널과 같은 `vpn.recovery` API를 사용합니다.
+- Webhook 입력은 항상 비어 있고, 저장된 URL은 다시 표시하지 않습니다. `discordWebhookConfigured`가 true이면 "Webhook 설정됨" 배지를 표시하고 삭제 버튼을 제공합니다.
+- webhook 삭제는 빈 문자열을 전송합니다. URL 필드를 비워 두고 저장하면 기존 webhook은 유지됩니다.
 - 로그아웃 버튼은 없습니다.
 
 ## 8. 목(Mock)과 테스트
@@ -228,7 +238,7 @@ Node.js 요구 사항은 README에 24 이상으로 적혀 있습니다. 이 PC�
   - `src/features/agents/sessionOrder.test.ts`
   - `src/features/session/sessionActions.test.ts`
   - `src/test/app.integration.test.tsx`
-- 통합 테스트는 MSW로 로그인, 머신, 세션, 프롬프트, 파일, VPN 흐름을 검증합니다.
+- 통합 테스트는 MSW로 로그인, 머신, 세션 생성, 프롬프트, 파일, VPN 흐름을 검증합니다.
 
 ### Playwright
 

@@ -45,32 +45,36 @@ public sealed partial class OpenCodeCapabilityProbe
 
     private async ValueTask<OpenCodeProbeResult> ProbeCoreAsync(CancellationToken ct)
     {
-        var (healthReachable, version) = await ReadVersionAsync(ct).ConfigureAwait(false);
-        var (docReachable, paths) = await ReadDocPathsAsync(ct).ConfigureAwait(false);
-        var routes = SelectRoutes(paths);
+        var (healthReachable, version, versionRoutes) = await ReadVersionAsync(ct).ConfigureAwait(false);
+        var (docReachable, paths, docRoutes) = await ReadDocPathsAsync(ct).ConfigureAwait(false);
+        var routes = SelectRoutes(paths, docRoutes, versionRoutes);
         var capabilities = paths is null ? CapabilitySet.None : ComputeCapabilities(paths);
         return new OpenCodeProbeResult(version, routes, capabilities, healthReachable || docReachable);
     }
 
-    private async ValueTask<(bool Reachable, string? Version)> ReadVersionAsync(CancellationToken ct)
+    private async ValueTask<(bool Reachable, string? Version, OpenCodeRoutes? Routes)> ReadVersionAsync(CancellationToken ct)
     {
         var reachable = false;
+        string? version = null;
+        OpenCodeRoutes? versionRoutes = null;
         foreach (var routes in new[] { OpenCodeRoutes.V1, OpenCodeRoutes.V2 })
         {
             var (responded, body) = await TryGetAsync(routes.Health, ct).ConfigureAwait(false);
             reachable |= responded;
-            if (body is { ValueKind: JsonValueKind.Object } health &&
-                health.TryGetProperty("version", out var version) &&
-                version.ValueKind == JsonValueKind.String)
+            if (version is null &&
+                body is { ValueKind: JsonValueKind.Object } health &&
+                health.TryGetProperty("version", out var versionElement) &&
+                versionElement.ValueKind == JsonValueKind.String)
             {
-                return (true, version.GetString());
+                version = versionElement.GetString();
+                versionRoutes = routes;
             }
         }
 
-        return (reachable, null);
+        return (reachable, version, versionRoutes);
     }
 
-    private async ValueTask<(bool Reachable, HashSet<string>? Paths)> ReadDocPathsAsync(CancellationToken ct)
+    private async ValueTask<(bool Reachable, HashSet<string>? Paths, OpenCodeRoutes? Routes)> ReadDocPathsAsync(CancellationToken ct)
     {
         var reachable = false;
         foreach (var routes in new[] { OpenCodeRoutes.V1, OpenCodeRoutes.V2 })
@@ -90,72 +94,95 @@ public sealed partial class OpenCodeCapabilityProbe
                 normalized.Add(NormalizePath(property.Name));
             }
 
-            return (true, normalized);
+            return (true, normalized, routes);
         }
 
-        return (reachable, null);
+        return (reachable, null, null);
     }
 
-    private static OpenCodeRoutes SelectRoutes(HashSet<string>? paths)
+    private static OpenCodeRoutes SelectRoutes(
+        HashSet<string>? paths,
+        OpenCodeRoutes? docRoutes,
+        OpenCodeRoutes? versionRoutes)
     {
-        if (paths is null)
+        if (paths is not null)
         {
-            return OpenCodeRoutes.V1;
+            if (paths.Contains("/api/session") || paths.Contains("/api/info"))
+            {
+                return OpenCodeRoutes.V2;
+            }
+
+            if (paths.Contains("/session") || paths.Contains("/global/health"))
+            {
+                return OpenCodeRoutes.V1;
+            }
         }
 
-        if (paths.Contains("/session"))
-        {
-            return OpenCodeRoutes.V1;
-        }
-
-        return paths.Contains("/api/session") ? OpenCodeRoutes.V2 : OpenCodeRoutes.V1;
+        return versionRoutes ?? docRoutes ?? OpenCodeRoutes.V1;
     }
 
     private static CapabilitySet ComputeCapabilities(HashSet<string> normalized)
     {
         var capabilities = CapabilitySet.None;
 
-        if (normalized.Contains("/session"))
+        if (Has(normalized, "/session", "/api/session"))
         {
             capabilities |= CapabilitySet.ListSessions;
         }
 
-        if (normalized.Contains("/session/*/message"))
+        if (Has(normalized, "/session/*/message", "/api/session/*/message"))
         {
             capabilities |= CapabilitySet.ReadMessages;
         }
 
-        if (normalized.Contains("/session/*/abort"))
+        if (Has(normalized, "/session/*/abort", "/api/session/*/interrupt", "/session/*/interrupt"))
         {
             capabilities |= CapabilitySet.Abort;
         }
 
-        if (normalized.Contains("/session/*/prompt_async"))
+        if (Has(normalized, "/session/*/prompt_async", "/api/session/*/prompt", "/session/*/prompt"))
         {
             capabilities |= CapabilitySet.PromptAsync | CapabilitySet.Prompt;
         }
 
-        if (normalized.Contains("/config/providers"))
+        if (Has(normalized, "/config/providers", "/api/model", "/model"))
         {
             capabilities |= CapabilitySet.ModelSelect;
         }
 
-        if (normalized.Contains("/session/*/permissions/*"))
+        if (Has(
+                normalized,
+                "/session/*/permissions/*",
+                "/api/session/*/permission/*/reply",
+                "/session/*/permission/*/reply"))
         {
             capabilities |= CapabilitySet.Permissions;
         }
 
-        if (normalized.Contains("/event"))
+        if (Has(normalized, "/event", "/api/event"))
         {
             capabilities |= CapabilitySet.LiveEvents;
         }
 
-        if (normalized.Contains("/session/*/children"))
+        if (Has(normalized, "/session/*/children", "/api/session/*/children"))
         {
             capabilities |= CapabilitySet.SubSessions;
         }
 
         return capabilities;
+    }
+
+    private static bool Has(HashSet<string> paths, params string[] candidates)
+    {
+        foreach (var candidate in candidates)
+        {
+            if (paths.Contains(candidate))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private async ValueTask<(bool Responded, JsonElement? Body)> TryGetAsync(string path, CancellationToken ct)

@@ -65,6 +65,52 @@ public sealed class FilesSystemTests : IDisposable
     }
 
     [Fact]
+    public void Browse_lists_drives_when_path_is_empty()
+    {
+        var view = _files.Browse(new FsBrowseQuery(null));
+
+        view.Path.ShouldBeNull();
+        view.ParentPath.ShouldBeNull();
+        view.Drives.ShouldNotBeEmpty();
+        view.Entries.ShouldBeEmpty();
+        view.QuickPaths.ShouldNotBeEmpty();
+        view.QuickPaths.ShouldAllBe(quick =>
+            Path.IsPathFullyQualified(quick.Path) && Directory.Exists(quick.Path));
+    }
+
+    [Fact]
+    public void Browse_returns_absolute_child_directories()
+    {
+        var view = _files.Browse(new FsBrowseQuery(_parent));
+
+        view.Path.ShouldBe(Path.TrimEndingDirectorySeparator(_parent));
+        view.ParentPath.ShouldNotBeNull();
+        view.Entries.ShouldContain(entry => entry.Name == "workspace" && entry.FullPath == _root);
+        view.Entries.ShouldAllBe(entry => entry.IsDir);
+        view.QuickPaths.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Browse_rejects_missing_directory()
+    {
+        var missing = Path.Combine(_parent, "missing");
+
+        var exception = Should.Throw<WorkspaceException>(() =>
+            _files.Browse(new FsBrowseQuery(missing)));
+
+        exception.Code.ShouldBe(AcErrorCodes.PathInvalid);
+    }
+
+    [Fact]
+    public void Browse_rejects_relative_path()
+    {
+        var exception = Should.Throw<WorkspaceException>(() =>
+            _files.Browse(new FsBrowseQuery("workspace")));
+
+        exception.Code.ShouldBe(AcErrorCodes.PathInvalid);
+    }
+
+    [Fact]
     public void Lists_directories_first_and_marks_denied_files()
     {
         var page = _files.List(Query(sort: FileSorts.Name));

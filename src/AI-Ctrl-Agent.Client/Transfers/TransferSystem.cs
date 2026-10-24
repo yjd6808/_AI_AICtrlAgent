@@ -7,6 +7,7 @@ using AiCtrl.Client.Storage;
 using AiCtrl.Client.Workspace;
 using AiCtrl.Core.Api;
 using AiCtrl.Core.Commands;
+using AiCtrl.Core.Config;
 using AiCtrl.Core.Protocol;
 using AiCtrl.Core.Runtime;
 using AiCtrl.Core.Workspace;
@@ -66,8 +67,8 @@ public sealed class TransferSystem : IAcSystem
         _time = time;
         _logger = logger;
         _tempDirectory = tempDirectory ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "AiCtrl",
+            AcDefaultConfigs.AgentHome,
+            "data",
             "transfers");
     }
 

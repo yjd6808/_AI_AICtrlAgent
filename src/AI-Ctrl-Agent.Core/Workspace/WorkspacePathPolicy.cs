@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using AiCtrl.Core.Api;
+using AiCtrl.Core.Config;
 
 namespace AiCtrl.Core.Workspace;
 
@@ -163,6 +164,9 @@ public sealed class WorkspacePathPolicy
     public static IReadOnlyList<string> CreateDefaultHardDenyPaths()
     {
         var paths = new List<string>();
+        paths.Add(AcDefaultConfigs.AgentHome);
+        paths.Add(AcDefaultConfigs.ServerHome);
+
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         if (!string.IsNullOrWhiteSpace(localAppData))
         {

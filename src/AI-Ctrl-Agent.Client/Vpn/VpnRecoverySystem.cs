@@ -15,6 +15,7 @@ public sealed class VpnRecoverySystem : IAcSystem
     private readonly IVpnRecoveryActions _actions;
     private readonly IVpnRecoveryNotifier _notifier;
     private readonly VpnRecoveryOptions _options;
+    private readonly VpnPolicyStore? _policy;
     private readonly ILogger<VpnRecoverySystem> _logger;
     private AcSystemContext? _context;
     private TimeProvider? _time;
@@ -27,7 +28,8 @@ public sealed class VpnRecoverySystem : IAcSystem
         IVpnRecoveryActions actions,
         IVpnRecoveryNotifier notifier,
         VpnRecoveryOptions options,
-        ILogger<VpnRecoverySystem> logger)
+        ILogger<VpnRecoverySystem> logger,
+        VpnPolicyStore? policy = null)
     {
         ArgumentNullException.ThrowIfNull(actions);
         ArgumentNullException.ThrowIfNull(notifier);
@@ -37,6 +39,7 @@ public sealed class VpnRecoverySystem : IAcSystem
         _notifier = notifier;
         _options = options;
         _logger = logger;
+        _policy = policy;
         _queue = Channel.CreateBounded<RecoveryTrigger>(new BoundedChannelOptions(100)
         {
             FullMode = BoundedChannelFullMode.DropOldest,
@@ -54,7 +57,7 @@ public sealed class VpnRecoverySystem : IAcSystem
         ArgumentNullException.ThrowIfNull(ctx);
         _context = ctx;
         _time = ctx.Time;
-        if (!_options.Enabled || Interlocked.Exchange(ref _initialized, 1) == 1)
+        if (Interlocked.Exchange(ref _initialized, 1) == 1)
         {
             return ValueTask.CompletedTask;
         }
@@ -67,19 +70,7 @@ public sealed class VpnRecoverySystem : IAcSystem
 
     public ValueTask StartAsync(CancellationToken ct)
     {
-        if (!_options.Enabled)
-        {
-            _logger.LogInformation("VPN recovery is disabled.");
-            return ValueTask.CompletedTask;
-        }
-
         var context = _context ?? throw new InvalidOperationException("InitAsync must be called before StartAsync.");
-        if (_options.WebhookUri is null)
-        {
-            _logger.LogWarning(
-                "VPN recovery is enabled without a valid HTTPS Discord webhook URL; notifications are disabled.");
-        }
-
         context.Loops.Run("vpn-recovery", RunAsync);
         return ValueTask.CompletedTask;
     }
@@ -118,10 +109,29 @@ public sealed class VpnRecoverySystem : IAcSystem
 
     private async Task ProcessAsync(RecoveryTrigger trigger, CancellationToken ct)
     {
+        var settings = await GetSettingsAsync(ct).ConfigureAwait(false);
+        if (!settings.Enabled)
+        {
+            return;
+        }
+
+        if (trigger.StalledFor is { } stalledFor)
+        {
+            if (!settings.HandleStalled
+                || (settings.StallThresholdSeconds > 0 && stalledFor < settings.StallThreshold))
+            {
+                return;
+            }
+        }
+        else if (!settings.ShouldHandle(trigger.ErrorClass))
+        {
+            return;
+        }
+
         var time = _time ?? throw new InvalidOperationException("InitAsync must be called before processing.");
         var state = _states.GetOrAdd(trigger.Session, _ => new RecoveryState());
         var now = time.GetUtcNow();
-        var maxAttempts = Math.Max(1, _options.MaxAttemptsPerSession);
+        var maxAttempts = Math.Max(1, settings.MaxAttemptsPerSession);
         var exhausted = false;
         var coolingDown = false;
 
@@ -139,7 +149,7 @@ public sealed class VpnRecoverySystem : IAcSystem
                     exhausted = true;
                 }
             }
-            else if (state.LastAttemptAt is { } last && now - last < _options.Cooldown)
+            else if (state.LastAttemptAt is { } last && now - last < settings.Cooldown)
             {
                 coolingDown = true;
             }
@@ -185,7 +195,7 @@ public sealed class VpnRecoverySystem : IAcSystem
                 return;
             }
 
-            if (_options.AutoConnectVpn)
+            if (settings.AutoConnectVpn)
             {
                 var connected = await _actions
                     .ConnectVpnAsync(trigger.ToContext(), ct)
@@ -208,12 +218,14 @@ public sealed class VpnRecoverySystem : IAcSystem
                     ct: ct).ConfigureAwait(false);
             }
 
-            if (!_options.AutoResume)
+            if (!settings.AutoResume)
             {
                 return;
             }
 
-            var resumed = await _actions.ResumeSessionAsync(trigger.Session, ct).ConfigureAwait(false);
+            var resumed = await _actions
+                .ResumeSessionAsync(trigger.Session, settings.ContinuationPrompt, ct)
+                .ConfigureAwait(false);
             if (!resumed.Succeeded)
             {
                 await NotifyAsync(
@@ -285,8 +297,11 @@ public sealed class VpnRecoverySystem : IAcSystem
         var kind = classified.Error.Class switch
         {
             ErrorClass.QuotaExceeded => VpnRecoveryNoticeKind.QuotaExceeded,
-            ErrorClass.RateLimited when _options.HandleRateLimited => VpnRecoveryNoticeKind.RateLimited,
-            ErrorClass.Network when _options.HandleStalled => VpnRecoveryNoticeKind.Stalled,
+            ErrorClass.RateLimited => VpnRecoveryNoticeKind.RateLimited,
+            ErrorClass.AuthFailed => VpnRecoveryNoticeKind.AuthFailed,
+            ErrorClass.ModelUnavailable => VpnRecoveryNoticeKind.ModelUnavailable,
+            ErrorClass.Network => VpnRecoveryNoticeKind.Network,
+            ErrorClass.Unknown => VpnRecoveryNoticeKind.Unknown,
             _ => (VpnRecoveryNoticeKind?)null,
         };
         return kind is null
@@ -303,17 +318,25 @@ public sealed class VpnRecoverySystem : IAcSystem
     }
 
     private ValueTask OnStalledAsync(SessionStalledEvent stalled, CancellationToken ct) =>
-        _options.HandleStalled
-            ? EnqueueAsync(
-                new RecoveryTrigger(
-                    stalled.Session,
-                    VpnRecoveryNoticeKind.Stalled,
-                    stalled.StalledFor,
-                    ErrorClass.Unknown,
-                    Message: null,
-                    Retry: null),
-                ct)
-            : ValueTask.CompletedTask;
+        EnqueueAsync(
+            new RecoveryTrigger(
+                stalled.Session,
+                VpnRecoveryNoticeKind.Stalled,
+                stalled.StalledFor,
+                ErrorClass.Unknown,
+                Message: null,
+                Retry: null),
+            ct);
+
+    private async Task<VpnRecoverySettings> GetSettingsAsync(CancellationToken ct)
+    {
+        if (_policy is null)
+        {
+            return _options.ToSettings().Normalize();
+        }
+
+        return await _policy.GetRecoveryAsync(ct).ConfigureAwait(false);
+    }
 
     private ValueTask OnTurnCompletedAsync(SessionTurnCompletedEvent completed, CancellationToken ct)
     {

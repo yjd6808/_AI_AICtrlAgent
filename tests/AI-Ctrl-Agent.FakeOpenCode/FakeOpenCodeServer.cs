@@ -69,6 +69,25 @@ public sealed class FakeOpenCodeServer : IAsyncDisposable
 
         app.MapGet("/session", () => Results.Json(state.ListSessions(), Json));
 
+        app.MapPost("/session", async (HttpContext context) =>
+        {
+            string? title = null;
+            string? parentId = null;
+            try
+            {
+                using var document = await JsonDocument.ParseAsync(context.Request.Body, cancellationToken: context.RequestAborted);
+                var root = document.RootElement;
+                title = ReadString(root, "title");
+                parentId = ReadString(root, "parentID");
+            }
+            catch (JsonException)
+            {
+            }
+
+            var directory = context.Request.Query["directory"].FirstOrDefault();
+            return Results.Json(state.CreateSession(title, parentId, directory), Json);
+        });
+
         app.MapGet("/session/status", () => Results.Json(state.BuildStatusMap(), Json));
 
         app.MapGet("/session/{sessionID}", (string sessionID) =>
@@ -333,7 +352,7 @@ public sealed class FakeOpenCodeServer : IAsyncDisposable
         {
             ["/global/health"] = Operation("get"),
             ["/doc"] = Operation("get"),
-            ["/session"] = Operation("get"),
+            ["/session"] = Operations("get", "post"),
             ["/session/status"] = Operation("get"),
             ["/session/{sessionID}"] = Operation("get"),
             ["/session/{sessionID}/message"] = Operation("get"),
@@ -357,11 +376,19 @@ public sealed class FakeOpenCodeServer : IAsyncDisposable
         }, Json);
     }
 
-    private static Dictionary<string, object?> Operation(string method) => new()
+    private static Dictionary<string, object?> Operation(string method) => Operations(method);
+
+    private static Dictionary<string, object?> Operations(params string[] methods)
     {
-        [method] = new Dictionary<string, object?>
+        var operations = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var method in methods)
         {
-            ["responses"] = new Dictionary<string, object?>(),
-        },
-    };
+            operations[method] = new Dictionary<string, object?>
+            {
+                ["responses"] = new Dictionary<string, object?>(),
+            };
+        }
+
+        return operations;
+    }
 }

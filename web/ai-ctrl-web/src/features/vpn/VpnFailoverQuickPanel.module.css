@@ -1,0 +1,247 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgb(35 48 68 / 72%);
+  border-radius: var(--radius-sm);
+  background: rgb(12 17 24 / 46%);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.heading {
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.subtitle {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 26px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.triggers {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 9px 10px;
+  border: 1px solid rgb(35 48 68 / 58%);
+  border-radius: var(--radius-sm);
+  background: rgb(9 13 18 / 42%);
+}
+
+.legend {
+  padding: 0 4px;
+  color: var(--text-subtle);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.triggerGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px 10px;
+}
+
+.trigger {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  min-width: 0;
+  font-size: 11px;
+}
+
+.triggerText {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.triggerHint {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.prompt textarea {
+  width: 100%;
+  min-height: 54px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  resize: vertical;
+}
+
+.prompt textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.hint {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.advanced {
+  border-top: 1px solid rgb(35 48 68 / 58%);
+  padding-top: 8px;
+}
+
+.advancedSummary {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.advancedGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.numberField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.numberField input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.numberField input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.actionMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.dirty {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgb(214 158 46 / 12%);
+  color: var(--warn);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.detailLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.message {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 11px;
+}
+
+@media (max-width: 720px) {
+  .triggerGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .advancedGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 420px) {
+  .triggerGrid {
+    grid-template-columns: 1fr;
+  }
+}

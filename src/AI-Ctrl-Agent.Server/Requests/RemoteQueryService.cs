@@ -146,13 +146,21 @@ public sealed class RemoteQueryService
                         StatusCodes.Status200OK);
                 }
 
+                var validationStatus = response.ErrorCode switch
+                {
+                    AcErrorCodes.PathInvalid => StatusCodes.Status400BadRequest,
+                    AcErrorCodes.PathDenied => StatusCodes.Status403Forbidden,
+                    _ => StatusCodes.Status502BadGateway,
+                };
                 return new RemoteQueryResult(
                     false,
                     null,
                     null,
-                    AcErrorCodes.QueryFailed,
+                    validationStatus == StatusCodes.Status502BadGateway
+                        ? AcErrorCodes.QueryFailed
+                        : response.ErrorCode,
                     response.ErrorMessage ?? $"Query '{type}' failed.",
-                    StatusCodes.Status502BadGateway);
+                    validationStatus);
             }
 
             var cached = await _db.GetQueryCacheAsync(machineId, cacheKey, ct).ConfigureAwait(false);

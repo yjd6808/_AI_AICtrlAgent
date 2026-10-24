@@ -106,7 +106,10 @@ builder.Services.AddSingleton(vpnOptions);
 builder.Services.AddSingleton(vpnRecoveryOptions);
 builder.Services.AddSingleton(sp => new VpnPolicyStore(
     time,
-    sp.GetRequiredService<ILogger<VpnPolicyStore>>()));
+    sp.GetRequiredService<ILogger<VpnPolicyStore>>(),
+    recoveryDefaults: vpnRecoveryOptions.ToSettings(),
+    secrets: secrets,
+    fallbackDiscordWebhookUrl: vpnRecoveryOptions.DiscordWebhookUrl));
 builder.Services.AddSingleton(serverLinkPresence);
 builder.Services.AddSingleton<INetworkChangeSignal>(network);
 builder.Services.AddSingleton<IProviderInstanceRegistry>(registry);
@@ -161,6 +164,7 @@ builder.Services.AddSingleton(sp => new VpnSystem(
     serverLinkConnected: () => serverLinkPresence.IsConnected,
     policyStore: sp.GetRequiredService<VpnPolicyStore>()));
 builder.Services.AddSingleton<IVpnRecoveryNotifier>(sp => new DiscordVpnRecoveryNotifier(
+    sp.GetRequiredService<VpnPolicyStore>(),
     vpnRecoveryOptions,
     sp.GetRequiredService<ILogger<DiscordVpnRecoveryNotifier>>()));
 builder.Services.AddSingleton<IVpnRecoveryActions>(sp => new VpnRecoveryActions(
@@ -175,7 +179,8 @@ builder.Services.AddSingleton(sp => new VpnRecoverySystem(
     sp.GetRequiredService<IVpnRecoveryActions>(),
     sp.GetRequiredService<IVpnRecoveryNotifier>(),
     vpnRecoveryOptions,
-    sp.GetRequiredService<ILogger<VpnRecoverySystem>>()));
+    sp.GetRequiredService<ILogger<VpnRecoverySystem>>(),
+    sp.GetRequiredService<VpnPolicyStore>()));
 builder.Services.AddSingleton(sp => new LocalApiSystem(
     sp.GetRequiredService<CommandSystem>(),
     registry,

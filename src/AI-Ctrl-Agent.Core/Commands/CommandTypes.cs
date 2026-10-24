@@ -24,6 +24,8 @@ public static class CommandTypes
 
     public const string VpnPolicySet = "vpn.policy.set";
 
+    public const string VpnRecoverySet = "vpn.recovery.set";
+
     public const string FilesReceive = "files.receive";
 
     public const string FilesSend = "files.send";

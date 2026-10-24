@@ -15,7 +15,7 @@
 
 - .NET: `C:\Program Files\dotnet`
 - Node.js: `C:\_Dev\node-22` (PATH 미등록)
-- OpenCode: `C:\Users\<user>\AppData\Roaming\npm\node_modules\opencode-ai\bin\opencode.exe`
+- OpenCode: `C:\Users\<user>\AppData\Roaming\npm\node_modules\@opencode\cli\bin\opencode.exe`
 
 ## 2. 최초 설치
 
@@ -33,7 +33,7 @@ npm run build
 
 ### 2.2 서버 설정 생성
 
-서버를 한 번 실행하면 `C:\AiCtrl\Server\config\server.yaml`이 기본값으로 생성됩니다. 실행 후 바로 종료해도 됩니다.
+서버를 한 번 실행하면 `C:\AiCtrl\AgentServer\config\server.yaml`이 기본값으로 생성됩니다. 실행 후 바로 종료해도 됩니다.
 
 ```powershell
 dotnet run --project src\AI-Ctrl-Agent.Server
@@ -52,11 +52,11 @@ web:
 
 설정 파일 경로는 코드에 고정되어 있습니다. 다른 디렉터리로 옮길 수 없습니다.
 
-- `C:\AiCtrl\Server\config\server.yaml`
-- `C:\AiCtrl\Server\config\server.overrides.yaml` (선택)
-- `C:\AiCtrl\Server\config\secrets.bin`
-- `C:\AiCtrl\Server\data\aictrl.db`
-- `C:\AiCtrl\Server\data\transfers`
+- `C:\AiCtrl\AgentServer\config\server.yaml`
+- `C:\AiCtrl\AgentServer\config\server.overrides.yaml` (선택)
+- `C:\AiCtrl\AgentServer\config\secrets.bin`
+- `C:\AiCtrl\AgentServer\data\aictrl.db`
+- `C:\AiCtrl\AgentServer\data\transfers`
 
 ### 2.3 Google 시크릿 저장
 
@@ -89,8 +89,10 @@ Google Cloud Console에서 OAuth 동의 화면과 Web 애플리케이션 클라�
 ### 2.5 서버 시작
 
 ```powershell
-dotnet run --project src\AI-Ctrl-Agent.Server
+C:\AiCtrl\Start-AgentServer.ps1
 ```
+
+개발 중에는 `dotnet run --project src\AI-Ctrl-Agent.Server`를 사용해도 됩니다.
 
 또는 빌드 결과를 직접 실행합니다.
 
@@ -109,14 +111,14 @@ curl.exe -s -i http://127.0.0.1:5080/api/v1/auth/login
 
 ### 2.6 에이전트 설정
 
-`%APPDATA%\AiCtrl\client.yaml`을 확인합니다. OpenCode가 PATH에 없다면 절대 경로를 지정합니다.
+`C:\AiCtrl\Agent\config\client.yaml`을 확인합니다. OpenCode가 PATH에 없다면 절대 경로를 지정합니다.
 
 ```yaml
 serverUrl: 'http://127.0.0.1:5080'
 localApi:
   port: 47800
 opencode:
-  executable: 'C:\Users\<user>\AppData\Roaming\npm\node_modules\opencode-ai\bin\opencode.exe'
+  executable: 'C:\Users\<user>\AppData\Roaming\npm\node_modules\@opencode\cli\bin\opencode.exe'
   host: 127.0.0.1
   port: 4096
 ```
@@ -137,6 +139,8 @@ opencode:
 dotnet run --project src\AI-Ctrl-Agent.Client
 ```
 
+또는 배포된 실행 파일을 `C:\AiCtrl\Start-Agent.ps1`로 시작합니다.
+
 등록 코드는 10분간 유효하고 1회만 사용할 수 있습니다. 등록 후 재시작하지 않으면 서버 링크가 시작되지 않습니다.
 
 ### 2.8 확인
@@ -146,7 +150,7 @@ dotnet run --project src\AI-Ctrl-Agent.Client
 - 로컬 API가 응답합니다.
 
 ```powershell
-$token = Get-Content "$env:LOCALAPPDATA\AiCtrl\local-token" -Raw
+$token = Get-Content "C:\AiCtrl\Agent\data\local-token" -Raw
 Invoke-RestMethod -Headers @{ Authorization = "Bearer $token" } http://127.0.0.1:47800/local/v1/status
 ```
 
@@ -170,7 +174,7 @@ dotnet publish src\AI-Ctrl-Agent.Client -c Release -r win-x64 --self-contained f
 
 - 서버는 `publish\server`에서 실행합니다. 로그는 실행 디렉터리의 `logs`에 생성됩니다.
 - 클라이언트는 `publish\client`에서 실행합니다.
-- `server.yaml`과 `secrets.bin`은 게시 디렉터리에 포함되지 않습니다. `C:\AiCtrl\Server\config`를 별도로 유지합니다.
+- `server.yaml`과 `secrets.bin`은 게시 디렉터리에 포함되지 않습니다. `C:\AiCtrl\AgentServer\config`를 별도로 유지합니다.
 - `web.distPath`는 게시 디렉터리의 절대 경로로 다시 지정합니다.
 
 ### 4.2 서비스 등록
@@ -180,6 +184,8 @@ dotnet publish src\AI-Ctrl-Agent.Client -c Release -r win-x64 --self-contained f
 - 서버는 시스템 부팅 후 자동 시작, 실패 시 재시작 정책을 설정합니다.
 - 클라이언트는 사용자 세션에서 실행해야 합니다. DPAPI `CurrentUser`, ProtonVPN, OpenCode가 사용자 컨텍스트에 의존합니다.
 - 클라이언트를 서비스 세션에서 실행하면 디바이스 키와 VPN helper 토큰을 복호화하지 못합니다.
+
+OpenCode `serve`는 예외적으로 전용 Windows 서비스 `AI-Ctrl-OpenCodeServer`가 관리합니다. 호스트는 `src/AI-Ctrl-Agent.OpenCodeService`이며, 설치는 `C:\AiCtrl\Install-Service.bat`, 제거는 `C:\AiCtrl\Remove-Service.bat`을 사용합니다. 자세한 내용은 `opencode-service.md`를 참조하십시오.
 
 ### 4.3 외부 노출
 
@@ -228,14 +234,14 @@ dotnet publish src\AI-Ctrl-Agent.Client -c Release -r win-x64 --self-contained f
 
 | 대상 | 경로 | 비고 |
 | --- | --- | --- |
-| 서버 설정 | `C:\AiCtrl\Server\config\server.yaml` | 시크릿 제외 |
-| 서버 시크릿 | `C:\AiCtrl\Server\config\secrets.bin` | 같은 머신에서만 복호화 |
-| 서버 DB | `C:\AiCtrl\Server\data\aictrl.db` | 명령·감사·캐시 |
-| 전송 파일 | `C:\AiCtrl\Server\data\transfers` | 진행 중 전송, TTL 24시간 |
-| 클라이언트 설정 | `%APPDATA%\AiCtrl\client.yaml` | 시크릿 제외 |
-| 클라이언트 DB | `%LOCALAPPDATA%\AiCtrl\client.db` | 등록 상태, journal, outbox |
-| 클라이언트 시크릿 | `%LOCALAPPDATA%\AiCtrl\secrets.bin` | 사용자 DPAPI |
-| VPN 정책 | `%LOCALAPPDATA%\AiCtrl\vpn-policy.json` | |
+| 서버 설정 | `C:\AiCtrl\AgentServer\config\server.yaml` | 시크릿 제외 |
+| 서버 시크릿 | `C:\AiCtrl\AgentServer\config\secrets.bin` | 같은 머신에서만 복호화 |
+| 서버 DB | `C:\AiCtrl\AgentServer\data\aictrl.db` | 명령·감사·캐시 |
+| 전송 파일 | `C:\AiCtrl\AgentServer\data\transfers` | 진행 중 전송, TTL 24시간 |
+| 클라이언트 설정 | `C:\AiCtrl\Agent\config\client.yaml` | 시크릿 제외 |
+| 클라이언트 DB | `C:\AiCtrl\Agent\data\client.db` | 등록 상태, journal, outbox |
+| 클라이언트 시크릿 | `C:\AiCtrl\Agent\data\secrets.bin` | 사용자 DPAPI |
+| VPN 정책 | `C:\AiCtrl\Agent\data\vpn-policy.json` | |
 
 ### 절차
 
@@ -280,9 +286,9 @@ Get-Process AI-Ctrl-Agent.Server, AI-Ctrl-Agent.Client, opencode -ErrorAction Si
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:5080/health
-Get-ChildItem "C:\AiCtrl\Server\config"
-Get-ChildItem "C:\AiCtrl\Server\data"
-Get-ChildItem "C:\AiCtrl\Server\data\transfers"
+Get-ChildItem "C:\AiCtrl\AgentServer\config"
+Get-ChildItem "C:\AiCtrl\AgentServer\data"
+Get-ChildItem "C:\AiCtrl\AgentServer\data\transfers"
 ```
 
 `/api/v1/logs/server`는 로그인 쿠키가 필요합니다. 쿠키 없이 확인하려면 로그 파일을 직접 읽습니다.
@@ -317,7 +323,7 @@ curl.exe -s -u opencode:<password> http://127.0.0.1:4096/global/health
 curl.exe -s -u opencode:<password> http://127.0.0.1:4096/config/providers
 ```
 
-OpenCode는 Basic 인증을 요구합니다. 인증 없이 호출하면 401입니다. 비밀번호는 `%LOCALAPPDATA%\AiCtrl\secrets.bin`의 `opencode.serve.password`에 있지만, 값을 출력하거나 셸 기록에 남기지 않습니다.
+OpenCode는 Basic 인증을 요구합니다. 인증 없이 호출하면 401입니다. 비밀번호는 `C:\AiCtrl\Agent\data\secrets.bin`의 `opencode.serve.password`에 있지만, 값을 출력하거나 셸 기록에 남기지 않습니다.
 
 ### 웹
 
@@ -326,7 +332,7 @@ Test-Path .\web\ai-ctrl-web\dist\index.html
 Invoke-WebRequest http://127.0.0.1:5080/ -UseBasicParsing | Select-Object StatusCode, Content
 ```
 
-dist가 없으면 `/`는 `AI-Ctrl-Agent Server` 문자열을 반환합니다. 이는 오류가 아니라 SPA 미배포 상태입니다.
+dist가 있으면 `/`는 `index.html`을 반환하고, 로그인 후 SPA가 머신 페이지(`/m/{machineId}`)로 이동합니다. dist가 없으면 `/`는 `AI-Ctrl-Agent Server` 문자열을 반환합니다. 이는 오류가 아니라 SPA 미배포 상태입니다.
 
 ## 10. 장애 대응
 
@@ -336,6 +342,7 @@ dist가 없으면 `/`는 `AI-Ctrl-Agent Server` 문자열을 반환합니다. �
 | `redirect_uri_mismatch` | Console URI 불일치 | 접속 주소와 `/signin-google` 조합 |
 | `email_not_allowed` | 허용 목록 누락 | `auth.allowedEmails` |
 | 로그인 후 401 반복 | 쿠키 미설정 | HTTPS 여부, `__Host-` 쿠키, 브라우저 쿠키 저장 |
+| 로그인 후 `AI-Ctrl-Agent Server` 텍스트만 표시 | `GET /` 엔드포인트가 SPA fallback을 가림 | `/` 응답의 `Content-Type`이 `text/html`인지, 라우팅 테이블에 `GET /` 중복이 없는지 확인 |
 | 머신 없음 | 미등록 | 에이전트 로그, Settings 코드 |
 | 머신 오프라인 | 에이전트 미실행/미등록 | 47800, 4096, 클라이언트 로그 |
 | OpenCode 시작 실패 | PATH/포트/권한 | `opencode.executable`, 4096 점유 |
@@ -373,6 +380,6 @@ dist가 없으면 `/`는 `AI-Ctrl-Agent Server` 문자열을 반환합니다. �
 - 웹: Vite `5173`에서 200
 - Google 로그인: `/api/v1/auth/login` → 302 `accounts.google.com`, redirect_uri `http://127.0.0.1:5080/signin-google`
 - 등록: 서버 DB에 머신·사용자·코드가 없음. Google 로그인 후 코드 발급과 `enroll`이 남아 있음
-- `%APPDATA%\AiCtrl\client.yaml`의 `opencode.executable`은 절대 경로로 수정됨
+- `C:\AiCtrl\Agent\config\client.yaml`의 `opencode.executable`은 절대 경로로 수정됨
 - Node.js는 PATH에 없어 `C:\_Dev\node-22`를 사용해야 함
 - GeoLite2 DB는 아직 배치되지 않음. 로컬 5080 운영에는 영향 없음

@@ -297,6 +297,173 @@
   color: var(--text-subtle);
 }
 
+.createPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.createHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.createTitle {
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.createClose {
+  padding: 4px 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.createClose:hover {
+  color: var(--text);
+}
+
+.createForm {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.createFields {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.createField,
+.createFieldWide {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.createSection {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.createField > span,
+.createFieldWide > span {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.createField select,
+.createFieldWide input,
+.createFieldWide textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.createField select {
+  padding-right: 30px;
+  appearance: none;
+  color-scheme: dark;
+}
+
+.createField select:not(:disabled) {
+  cursor: pointer;
+}
+
+.createField select option {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.selectWrap {
+  position: relative;
+}
+
+.selectIcon {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  color: var(--text-subtle);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.createFieldWide textarea {
+  resize: vertical;
+  min-height: 70px;
+}
+
+.pathRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pathRow input {
+  flex: 1;
+  min-width: 0;
+}
+
+.pathRow > button {
+  flex: none;
+}
+
+.createField select:focus,
+.createFieldWide input:focus,
+.createFieldWide textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.createField select:disabled,
+.createFieldWide input:disabled,
+.createFieldWide textarea:disabled {
+  opacity: 0.6;
+}
+
+.createActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.createHint {
+  color: var(--text-subtle);
+  font-size: 11px;
+}
+
+.createError {
+  color: var(--danger);
+  font-size: 12px;
+}
+
+@media (min-width: 620px) {
+  .createFields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .createFieldWide {
+    grid-column: 1 / -1;
+  }
+}
+
 @media (min-width: 620px) {
   .instanceGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -22,6 +22,7 @@ import {
   fetchInstances,
   fetchMachine,
   fetchMachines,
+  fetchMachineFs,
   fetchMe,
   fetchMessages,
   fetchModels,
@@ -32,9 +33,11 @@ import {
   fetchTransfer,
   fetchVpnPage,
   fetchVpnPolicy,
+  fetchVpnRecovery,
   fetchWorkspaces,
   issueAbort,
   issueAbortAndPrompt,
+  issueCreateSession,
   issuePrompt,
   mkdir,
   putTransferChunk,
@@ -43,6 +46,7 @@ import {
   revokeMachine,
   transferContentUrl,
   updateVpnPolicy,
+  updateVpnRecovery,
   apiPaths,
   api,
 } from './client'
@@ -53,10 +57,12 @@ import type {
   FileSort,
   PromptInput,
   ProviderKind,
+  SessionCreateInput,
   SessionView,
   UploadConflict,
   VpnConnectInput,
   VpnPolicyUpdateInput,
+  VpnRecoveryUpdateInput,
 } from './types'
 import { ulid } from 'ulid'
 
@@ -84,6 +90,8 @@ export const queryKeys = {
   serverLogs: ['server-logs'] as const,
   serverLog: (name: string, lines: number) => ['server-log', name, lines] as const,
   workspaces: (machineId: string) => ['workspaces', machineId] as const,
+  machineFs: (machineId: string, path: string) =>
+    ['machine-fs', machineId, path] as const,
   files: (machineId: string, workspaceId: string, path: string, sort: FileSort) =>
     ['files', machineId, workspaceId, path, sort] as const,
   filePreview: (machineId: string, workspaceId: string, path: string) =>
@@ -91,6 +99,7 @@ export const queryKeys = {
   vpnPage: (machineId: string, country: string, prevCity: string) =>
     ['vpn-page', machineId, country, prevCity] as const,
   vpnPolicy: (machineId: string) => ['vpn-policy', machineId] as const,
+  vpnRecovery: (machineId: string) => ['vpn-recovery', machineId] as const,
 }
 
 const terminalCommandStatuses: CommandStatus[] = [
@@ -330,6 +339,16 @@ export function useWorkspaces(machineId: string | undefined) {
     enabled: Boolean(machineId),
     refetchInterval: 20_000,
     refetchIntervalInBackground: false,
+  })
+}
+
+export function useMachineFs(machineId: string | undefined, path: string | null | undefined) {
+  return useQuery({
+    queryKey: queryKeys.machineFs(machineId ?? '', path ?? ''),
+    queryFn: ({ signal }) => fetchMachineFs(machineId ?? '', path, signal),
+    enabled: Boolean(machineId),
+    staleTime: 10_000,
+    retry: false,
   })
 }
 
@@ -583,6 +602,27 @@ export function useUpdateVpnPolicy(machineId: string) {
   })
 }
 
+export function useVpnRecovery(machineId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.vpnRecovery(machineId ?? ''),
+    queryFn: ({ signal }) => fetchVpnRecovery(machineId ?? '', signal),
+    enabled: Boolean(machineId),
+    refetchInterval: 30_000,
+  })
+}
+
+export function useUpdateVpnRecovery(machineId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: VpnRecoveryUpdateInput) =>
+      updateVpnRecovery(machineId, input, ulid()),
+    retry: false,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.vpnRecovery(machineId) })
+    },
+  })
+}
+
 export function useRefreshInstances(machineId: string) {
   const queryClient = useQueryClient()
   return useMutation({
@@ -599,6 +639,23 @@ export function useRefreshInstances(machineId: string) {
         queryClient.invalidateQueries({ queryKey: queryKeys.instances(machineId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.features(machineId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.machine(machineId) }),
+      ])
+    },
+  })
+}
+
+export function useCreateSession(machineId: string, instanceId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: SessionCreateInput) =>
+      issueCreateSession(machineId, instanceId, input, ulid()),
+    retry: false,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ['sessions', machineId, instanceId],
+        }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.commands({}) }),
       ])
     },
   })
